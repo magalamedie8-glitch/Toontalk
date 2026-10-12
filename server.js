@@ -206,6 +206,7 @@ const SCRIPT_GUIDE = [
   '[prop: table at center]  [prop: remove table]   props: ball, phone, book, bag, umbrella, rolex, cup, broom, mic, box, chair, table',
   '[Name holds ball]  [Name drops ball]  [Name throws ball to Mama] (caught)  [Name throws ball at Mama]  [Name gives phone to Mama]',
   '[title: Round 1]   a title card',
+  '[Name is a cat]   gives a character a look, put it near the start. Looks: cat, dog, bunny, bear, panda, lion, monkey, elephant, frog, pig, owl, duck, fox, mouse, cow, robot, alien, ghost, monster, devil, angel, zombie, vampire, wizard, pirate, ninja, knight, astronaut, superhero, king, queen, clown, detective, chef, doctor, cowboy, caveman, mzee, granny, baby. Pick a look that fits each character (a goat story can use a cow or a pig); animals can talk.',
   'MODES (put the mode line first when used): [mode: classroom] with [teacher: Name]; [mode: story] with [storyteller: Name] and [picture: village] (or night, day, market, home, street, off) while the story is told; [mode: debate] with [moderator: Name], [proposition: A, B], [opposition: C, D]. In these modes the leader stands on one side and the others on the other side; pupils/children ask questions, the leader answers.',
   '',
   'RULES:',

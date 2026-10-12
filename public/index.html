@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="ToonTalk">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>ToonTalk Studio</title>
 <style>
   *{box-sizing:border-box}
@@ -82,6 +82,32 @@
   #aiEd .ai-eng{display:inline-block;font-size:12px;padding:3px 9px;border-radius:99px;background:#2a2a3a}
   #aiEd .ai-eng.ok{background:#7048e8;color:#fff}
   @media (max-width:520px){#aiEd .ai-g{grid-template-columns:1fr}}
+  /* ---- phone polish ---- */
+  body{overscroll-behavior-y:contain;padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+  #projPage,#poseEd,#aiEd,#kindEd{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+  @media (pointer:coarse){
+    button,select,input[type=text]{min-height:46px}
+    .card select{padding:10px;font-size:15px}
+    .card input[type=color]{width:52px;height:40px}
+    .card input[type=range]{height:34px}
+    .tabs button,.pa button{min-height:48px}
+  }
+  @media (max-width:700px){
+    body{padding:0 12px 20px;gap:10px;display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch}
+    input[type=text],textarea,select{font-size:16px}
+    .stage{position:sticky;top:0;z-index:20;background:#12121a;padding:6px 0 8px;margin:0 -12px}
+    .stage canvas{height:42vh;transition:height .2s}
+    .stage.big canvas{height:72vh}
+    #status{max-width:none;padding:0 12px}
+    .panel{width:100%;padding-top:6px}
+    .stage #stageHint{display:block}
+    .stage #miniBar{display:flex}
+    .stage canvas{height:34vh}
+    .stage.big canvas{height:66vh}
+  }
+  #miniBar{display:none;gap:8px;width:100%;padding:0 12px}
+  #miniBar button{min-height:44px;padding:8px}
+  #stageHint{display:none;font-size:11px;opacity:.5;text-align:center}
   #kindEd{position:fixed;inset:0;background:#12121a;z-index:47;overflow:auto;padding:14px}
   #kindEd .kd-w{max-width:760px;margin:0 auto}
   #kindEd .kd-h{font-weight:700;margin:16px 0 8px;color:#ffd43b}
@@ -114,6 +140,14 @@
     <button id="stop">■ Stop</button>
     <button id="rec">🎬 Create video</button>
   </div>
+  <label class="hint" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="devMp4" checked style="width:auto"> Make the MP4 on this device (works offline). Untick to use the server instead.</label>
+  <details id="srvSet" class="hint"><summary style="cursor:pointer;padding:6px 0">⚙ Server settings (voices, AI helper)</summary>
+    <div style="display:flex;flex-direction:column;gap:8px;padding:6px 0">
+      <label>Server address. Leave empty to use the server this page came from.</label>
+      <input type="text" id="srvUrl" placeholder="https://your-server.example.com" autocapitalize="off" autocomplete="off" spellcheck="false">
+      <div style="display:flex;gap:8px"><button id="srvSave" style="background:#ffd43b">Save and test</button><button id="srvClear" style="background:#adb5bd">Use default</button></div>
+      <div id="srvMsg"></div>
+    </div></details>
   <div class="hint">Press <b>Play</b> to preview. When the episode is ready, press <b>Create video</b>. Nothing downloads until you press <b>Download</b>.</div>
   <div class="tabs"><button id="tabWrite" class="on">✍ Write</button><button id="tabChars">👥 Characters</button></div>
   <div id="paneWrite">
@@ -132,7 +166,7 @@ Nakato (laugh): Hahaha, you cannot prove it!
 Mama (love): Okay okay, I will make you both chapati.</textarea>
   <div class="hint"><b>Emotions:</b> happy, angry, sad, shocked, laugh, scared, sleepy, love<br><b>Scenes:</b> day, sunset, night, home, classroom, market, village, street</div>
   <div class="hint"><b>Moves:</b> [Kato walks to right] &nbsp; [Kato runs to left] &nbsp; [Kato walks to center]<br><b>Actions:</b> [Kato waves] [Kato jumps] [Kato dances] [Kato points] [Kato bows]<br><b>Talk while moving:</b> Kato (angry, walk right): words<br>Set a character's <b>Style</b> to “Stick figure” in its card below.</div>
-  <div class="hint"><b>Big casts:</b> every new name becomes a character (up to 24).<br><b>Enter / leave:</b> [Mama enters left] [Kato leaves right]<br><b>Timing:</b> [pause 1s] [beat] or Kato (beat): words<br><b>Interrupt:</b> Nakato (interrupts): No!<br><b>Reactions:</b> [Nakato gasps] [Nakato stares 2s] [also Mama laughs] (during the next line). Also: cries, glares, blushes, smiles, freezes, yawns<br><b>Move:</b> [Kato walks to Mama] [Kato runs away from Mama] [Mama walks to the door] (places: door, gate, tree, table, stall, bench, left, right, center)<br><b>Actions:</b> [Kato sits] [Kato stands] [Kato falls] spins shrugs claps kicks cheers crouches nods salutes waves jumps dances points bows. Also inside brackets: Kato (angry, shrug): words<br><b>Camera:</b> [camera: zoom Kato] [camera: follow] [camera: shake] [camera: wide]<br><b>Sounds:</b> [sfx: pop] boing slap ding whoosh drum fail laugh wow crash</div>
+  <div class="hint"><b>Character types:</b> [Kato is a cat] [Nakato is a wizard] — also dog, bunny, bear, panda, lion, monkey, elephant, frog, pig, owl, duck, fox, mouse, cow, robot, alien, ghost, monster, devil, angel, zombie, vampire, pirate, ninja, knight, astronaut, superhero, king, queen, clown, detective, chef, doctor, cowboy, caveman, mzee, granny, baby (or pick from the 🎭 Character button on a card).<br><b>Big casts:</b> every new name becomes a character (up to 24).<br><b>Enter / leave:</b> [Mama enters left] [Kato leaves right]<br><b>Timing:</b> [pause 1s] [beat] or Kato (beat): words<br><b>Interrupt:</b> Nakato (interrupts): No!<br><b>Reactions:</b> [Nakato gasps] [Nakato stares 2s] [also Mama laughs] (during the next line). Also: cries, glares, blushes, smiles, freezes, yawns<br><b>Move:</b> [Kato walks to Mama] [Kato runs away from Mama] [Mama walks to the door] (places: door, gate, tree, table, stall, bench, left, right, center)<br><b>Actions:</b> [Kato sits] [Kato stands] [Kato falls] spins shrugs claps kicks cheers crouches nods salutes waves jumps dances points bows. Also inside brackets: Kato (angry, shrug): words<br><b>Camera:</b> [camera: zoom Kato] [camera: follow] [camera: shake] [camera: wide]<br><b>Sounds:</b> [sfx: pop] boing slap ding whoosh drum fail laugh wow crash</div>
   <div class="hint"><b>Modes</b> (pick one above, or write <b>[mode: classroom]</b>):<br><b>Classroom:</b> the teacher stands on the left, pupils sit in rows on the right and stand up when they speak. Write <b>[teacher: Mr Okello]</b> (otherwise the first speaker, or a name like Teacher or Mr/Mrs, leads). [Nakato raises hand]<br><b>Storytelling:</b> <b>[storyteller: Jajja]</b> sits on the left, the children sit on the right and ask from their seats. Show the story in a picture window: <b>[picture: village]</b> ... <b>[picture: off]</b><br><b>Debate:</b> <b>[moderator: Mrs Nabirye]</b> in the middle, <b>[proposition: Kato, Nakato]</b> on the left, <b>[opposition: Musa, Aisha]</b> on the right (others are split into two teams automatically)<br><b>Title cards:</b> [title: Round 1] &nbsp; <b>Places:</b> compound, classroom, room, tree (story tree), hall (debate hall)</div>
   <div class="hint"><b>✨ AI helper:</b> type an idea and it writes the script for you (needs an AI key for original writing; works as a basic template without one).<br><b>Your own moves:</b> press ✏️ Action editor, drag the joints, add frames, name it (e.g. <i>victory</i>) and save. Use it like <b>[Kato victory]</b> or <b>Kato (victory): words</b><br><b>Props:</b> [Kato holds ball] [Kato drops ball] [Kato throws ball to Nakato] (catches it) &nbsp;[Kato throws ball at Mama] [Kato gives phone to Nakato]<br><b>Set pieces:</b> [prop: table at center] [prop: chair at left] [prop: remove table] &nbsp;<b>Props:</b> ball, phone, book, bag, umbrella, rolex, cup, broom, mic, box, chair, table</div>
   <div class="row"><button id="btnAi" style="background:#b197fc">✨ AI script helper</button><button id="btnPose" style="background:#ffd43b">✏️ Action editor</button><button id="demoE" style="background:#eebefa">Props &amp; moves demo</button></div>
@@ -168,6 +202,8 @@ Mama (love): Okay okay, I will make you both chapati.</textarea>
 
 <div class="stage">
   <canvas id="c" width="540" height="960"></canvas>
+  <div id="miniBar"><button data-t="play" style="background:#69db7c">▶</button><button data-t="stop" style="background:#adb5bd">■</button><button data-t="rec" style="background:#ff6b6b">🎬 Video</button></div>
+  <div id="stageHint">Tap the picture to make it bigger or smaller</div>
   <div id="status"></div>
   <div id="result" hidden>
     <video id="pv" controls playsinline></video>
@@ -225,6 +261,7 @@ Mama (love): Okay okay, I will make you both chapati.</textarea>
 </div></div>
 <div id="modal" hidden><div id="mbox"></div></div>
 
+<script src="vendor/mp4-muxer.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const canvas=$('c');let ctx=canvas.getContext('2d');
@@ -279,7 +316,8 @@ function resolveVoice(f,i){
 const rateNow=()=>clamp(+$('speed').value/22,0.6,1.8);
 
 /* ---------- server voices (natural voices from server.js) ---------- */
-const API=location.protocol==='file:'?'http://localhost:3000':'';
+let API=location.protocol==='file:'?'http://localhost:3000':'';
+try{const sv=localStorage.getItem('toontalk-server');if(sv)API=sv.replace(/\/+$/,'');}catch(e){}
 let srvVoices=[],srvOnline=false;
 async function loadServerVoices(){
   try{
@@ -415,6 +453,8 @@ function build(){
     if(m){const nm=propKey(m[2]);if(nm){const who=findChar(m[1].trim());if(who)segs.push({type:'prop',op:'hold',who,name:nm,dur:0.45});return;}}
     m=l.match(/^\[\s*([^\]]{1,20}?)\s+(?:drops?|puts down|puts away|lets go of|releases|throws away)(?:\s+(?:the\s+|a\s+|an\s+|his\s+|her\s+)?(.+?))?\s*\]$/i);
     if(m){const who=findChar(m[1].trim());if(who)segs.push({type:'prop',op:'drop',who,name:m[2]?propKey(m[2]):null,dur:0.45});return;}
+    m=l.match(/^\[\s*([^\]]{1,20}?)\s+(?:is|as|becomes|looks like)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ()]{1,24}?)\s*\]$/i);
+    if(m){const kk=kindFromWord(m[2]);if(kk!==undefined){const w=findChar(m[1].trim());if(w)setKind(w,kk);return;}}
     m=l.match(/^\[\s*mode\s*:\s*(normal|classroom|class|debate|story|storytelling)\s*\]$/i);
     if(m){const k=m[1].toLowerCase();MODE.mode=k==='class'?'classroom':k==='storytelling'?'story':k;return;}
     m=l.match(/^\[\s*(?:title|round|chapter|lesson)\s*:\s*([^\]]{1,80}?)\s*\]$/i);
@@ -2208,6 +2248,19 @@ function kindDraw(f,layer,y,st,tt,emo){
   ctx.restore();
 }
 function kindOf(f){return f&&f.kind&&KINDS[f.kind]?f.kind:'';}
+const KIND_SYN={rabbit:'bunny',puppy:'dog',kitten:'cat',grandma:'granny',grandmother:'granny',jajja:'granny',old:'mzee',elder:'mzee','old man':'mzee',mzee:'mzee',nurse:'doctor',spaceman:'astronaut',cop:'detective',sheriff:'cowboy',prince:'king',princess:'queen',bird:'owl',goat:'cow',pigeon:'duck',chicken:'duck',gorilla:'monkey',tiger:'lion',wolf:'dog',ogre:'monster',skeleton:'zombie',spirit:'ghost',person:'',human:'',normal:'',boy:'',girl:''};
+function kindFromWord(w){
+  w=String(w).toLowerCase().replace(/\s*\(.*\)\s*/g,' ').trim();
+  if(KIND_SYN[w]!==undefined)return KIND_SYN[w];
+  if(KINDS[w])return w;
+  for(const k in KINDS){if(KINDS[k].n.toLowerCase().replace(/\s*\(.*\)/,'').trim()===w)return k;}
+  return undefined;
+}
+function setKind(name,k){
+  const f=cfg[name];if(!f)return;
+  if((f.kind||'')===k)return;
+  f.kind=k;if(k&&KINDS[k]){f.skin=KINDS[k].skin;f.outfit=KINDS[k].outfit;}
+}
 function kindLabel(k){return k&&KINDS[k]?KINDS[k].n:'Person';}
 const _kt={};
 function kindThumb(key){
@@ -2367,10 +2420,11 @@ async function start(withRec){
   if(withRec){
     const lost=segs.filter(sg=>sg.type==='line'&&!sg.buf&&cfg[sg.who].voice!=='blip').length;
     if(lost)$('status').textContent=(srvOnline?lost+' line(s) could not get a server voice':'No voice server is connected')+', so '+(lost===1?'it uses':'they use')+' beep voices in the video (browser voices cannot be recorded). Connect Sunbird or Azure for real voices.';
-    startRecording(null);
+    const mp4c=await mp4Setup();
+    if(mp4c)startMp4Recording(mp4c);else startRecording(null);
   }
   if(withRec&&!$('status').textContent)$('status').textContent='Creating your video... keep this tab open and visible. Nothing downloads by itself.';
-  curBg=$('bg').value;playing=true;enter(0,performance.now());
+  curBg=$('bg').value;playing=true;keepAwake(true);enter(0,performance.now());
 }
 /* ---------- finished video: convert to MP4, preview, download, share ---------- */
 let lastUrl=null,lastFile=null,recPeak=null;
@@ -2411,6 +2465,106 @@ function showResult(blob,ext,skipStore){
   $('resNote').textContent=proj.downloaded?'Downloaded ✓ A copy stays in My projects until you delete it.':'Not downloaded yet. Press Download when you want the file.';
   if(!skipStore)storeVideo(blob,ext);
 }
+/* ---------- in-browser MP4 (WebCodecs + mp4-muxer): no server needed ---------- */
+async function mp4Setup(){
+  try{
+    if(!$('devMp4').checked)return null;
+    if(!(window.VideoEncoder&&window.AudioEncoder&&window.VideoFrame&&window.AudioData&&window.Mp4Muxer))return null;
+    const W=canvas.width,H=canvas.height,sr=actx.sampleRate;
+    const vok=async(codec)=>{try{return (await VideoEncoder.isConfigSupported({codec,width:W,height:H,bitrate:4e6,framerate:30})).supported;}catch(e){return false;}};
+    const aok=async(codec)=>{try{return (await AudioEncoder.isConfigSupported({codec,sampleRate:sr,numberOfChannels:2,bitrate:128000})).supported;}catch(e){return false;}};
+    // H.264 + AAC plays everywhere (TikTok, WhatsApp, iPhone). VP9 + Opus is the fallback for browsers without them.
+    for(const vc of ['avc1.42001f','avc1.4d001f'])if(await vok(vc)&&await aok('mp4a.40.2'))return {vc,vm:'avc',ac:'mp4a.40.2',am:'aac',W,H,sr};
+    if(await vok('vp09.00.31.08')&&await aok('opus'))return {vc:'vp09.00.31.08',vm:'vp9',ac:'opus',am:'opus',W,H,sr};
+    return null;
+  }catch(e){return null;}
+}
+function mp4Start(c){
+  const target=new Mp4Muxer.ArrayBufferTarget();
+  const muxer=new Mp4Muxer.Muxer({target,video:{codec:c.vm,width:c.W,height:c.H,frameRate:30},audio:{codec:c.am,numberOfChannels:2,sampleRate:c.sr},fastStart:'in-memory',firstTimestampBehavior:'offset'});
+  let err=null,alive=true,raf=0,lastF=-1,aFrames=0;
+  const venc=new VideoEncoder({output:(ch,m)=>{try{muxer.addVideoChunk(ch,m);}catch(e){err=e;}},error:e=>{err=e;}});
+  venc.configure({codec:c.vc,width:c.W,height:c.H,bitrate:4e6,framerate:30});
+  const aenc=new AudioEncoder({output:(ch,m)=>{try{muxer.addAudioChunk(ch,m);}catch(e){err=e;}},error:e=>{err=e;}});
+  aenc.configure({codec:c.ac,sampleRate:c.sr,numberOfChannels:2,bitrate:128000});
+  const src=actx.createMediaStreamSource(dest.stream),proc=actx.createScriptProcessor(4096,2,2),mute=actx.createGain();
+  mute.gain.value=0;src.connect(proc);proc.connect(mute);mute.connect(actx.destination);
+  proc.onaudioprocess=e=>{
+    if(!alive)return;
+    const L=e.inputBuffer.getChannelData(0),R=e.inputBuffer.numberOfChannels>1?e.inputBuffer.getChannelData(1):L;
+    const d=new Float32Array(L.length*2);d.set(L,0);d.set(R,L.length);
+    try{aenc.encode(new AudioData({format:'f32-planar',sampleRate:c.sr,numberOfFrames:L.length,numberOfChannels:2,timestamp:Math.round(aFrames/c.sr*1e6),data:d}));}catch(x){err=x;}
+    aFrames+=L.length;
+  };
+  const t0=performance.now();let nF=0;
+  const loop=()=>{
+    if(!alive)return;
+    const fi=Math.floor((performance.now()-t0)/33.333);
+    if(fi!==lastF&&venc.encodeQueueSize<8){
+      lastF=fi;
+      try{const fr=new VideoFrame(canvas,{timestamp:Math.round(fi*33333.33)});venc.encode(fr,{keyFrame:nF%90===0});fr.close();nF++;}catch(x){err=x;}
+    }
+    raf=requestAnimationFrame(loop);
+  };
+  raf=requestAnimationFrame(loop);
+  return {async stop(){
+    alive=false;cancelAnimationFrame(raf);proc.onaudioprocess=null;
+    try{src.disconnect();proc.disconnect();mute.disconnect();}catch(e){}
+    await venc.flush();await aenc.flush();venc.close();aenc.close();
+    if(err)throw err;
+    muxer.finalize();
+    return new Blob([target.buffer],{type:'video/mp4'});
+  }};
+}
+function startMp4Recording(c){
+  const h=mp4Start(c);
+  recorder={state:'recording',onstop:null,stop(){
+    this.state='inactive';const cb=this.onstop;
+    h.stop().then(b=>cb&&cb(b,null)).catch(e=>cb&&cb(null,e));
+  }};
+  recorder.onstop=async(blob,err)=>{
+    if(dispStream){dispStream.getTracks().forEach(t=>t.stop());dispStream=null;}
+    if(!blob){$('status').textContent='Making the MP4 on this device failed ('+(err&&err.message||err)+'). Untick "Make the MP4 on this device" and try again.';return;}
+    const pk=await audioPeak(blob);recPeak=pk;
+    console.info('ToonTalk device MP4:',c.vc,c.ac,'size',blob.size,'loudest sample:',pk);
+    const lines=segs.some(sg=>sg.type==='line'&&sg.buf);
+    $('status').textContent=(pk!==null&&pk<0.005&&lines)?'Your MP4 is ready, but it has NO SOUND. Check the voice server status in the Characters tab.':'Your MP4 is ready (made on this device). Download or share it below.';
+    showResult(blob,'mp4');
+  };
+  recording=true;
+}
+/* ---------- phone helpers: keep screen awake, warn if the app is hidden while recording ---------- */
+let wakeLock=null;
+async function keepAwake(on){
+  try{
+    if(on&&'wakeLock' in navigator&&!wakeLock){wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null;});}
+    else if(!on&&wakeLock){await wakeLock.release();wakeLock=null;}
+  }catch(e){wakeLock=null;}
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&playing)keepAwake(true);
+  if(document.hidden&&recording)$('status').textContent='Keep ToonTalk open on screen while the video is being made, or it will have a gap.';
+});
+document.querySelectorAll('#miniBar button').forEach(b=>b.onclick=()=>$(b.dataset.t).click());
+$('srvUrl').value=(()=>{try{return localStorage.getItem('toontalk-server')||'';}catch(e){return '';}})();
+async function srvTest(){
+  const m=$('srvMsg');m.textContent='Testing...';
+  try{
+    const r=await fetch(API+'/api/health');if(!r.ok)throw new Error('HTTP '+r.status);
+    const h=await r.json();
+    m.textContent='Connected ✓  Voices: '+(h.provider||'none')+(h.sunbird?' + Sunbird Luganda':'')+'.  AI helper: '+(h.ai?'on':'off (no key on the server)')+'.';
+    loadServerVoices();
+  }catch(e){m.textContent='Could not reach '+(API||'this site')+'. Check the address, that the server is running, and that it starts with https:// when this page is on https://.';}
+}
+$('srvSave').onclick=()=>{
+  let v=$('srvUrl').value.trim();
+  if(v&&!/^https?:\/\//i.test(v))v=(/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(v)?'http://':'https://')+v;
+  v=v.replace(/\/+$/,'');$('srvUrl').value=v;
+  try{if(v)localStorage.setItem('toontalk-server',v);else localStorage.removeItem('toontalk-server');}catch(e){}
+  API=v||(location.protocol==='file:'?'http://localhost:3000':'');srvTest();
+};
+$('srvClear').onclick=()=>{$('srvUrl').value='';$('srvSave').click();};
+$('c').addEventListener('click',()=>{if(window.innerWidth<=700)document.querySelector('.stage').classList.toggle('big');});
 function startRecording(tabAudio){
   const stream=canvas.captureStream(30);
   if(tabAudio)stream.addTrack(tabAudio);
@@ -2429,14 +2583,14 @@ function startRecording(tabAudio){
   recorder.start();recording=true;
 }
 function finish(){
-  playing=false;stopSrv();
+  playing=false;stopSrv();keepAwake(false);
   if('speechSynthesis' in window)speechSynthesis.cancel();
   if(recording&&recorder&&recorder.state!=='inactive'){setTimeout(()=>{recorder.stop();recording=false;},500);}
   else $('status').textContent='Done.';
 }
 function stopSrv(){segs.forEach(s=>{if(s.src){try{s.src.onended=null;s.src.stop();}catch(e){}s.src=null;}});}
 function stopAll(silent){
-  playing=false;stopSrv();
+  playing=false;stopSrv();if(!silent)keepAwake(false);
   if('speechSynthesis' in window)speechSynthesis.cancel();
   if(recording&&recorder&&recorder.state!=='inactive'){
     if(silent)recorder.onstop=null;
