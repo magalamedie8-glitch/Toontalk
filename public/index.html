@@ -363,7 +363,8 @@ function pickVoiceFor(vtKey,exceptName){
   const ageRank=a=>Math.abs(['child','teen','adult','elder'].indexOf(a)-['child','teen','adult','elder'].indexOf(want));
   const cands=srvVoices.map(v=>({v,t:tagOf(v)})).filter(c=>!vt.g||!c.t.g||c.t.g===vt.g);
   if(!cands.length)return '';
-  cands.forEach(c=>{c.score=(c.t.g===vt.g&&vt.g?0:1)*10+ageRank(c.t.a)*3+(used['srv:'+c.v.id]||0)*2+(c.v.auto?0:0.5);});
+  const hasAuto=srvVoices.some(v=>v.auto);
+  cands.forEach(c=>{c.score=(hasAuto&&!c.v.auto?30:0)+(/^(en|lug|sw)(-|$)/i.test(c.v.lang||'en')?0:25)+(c.t.g===vt.g&&vt.g?0:1)*10+ageRank(c.t.a)*3+(used['srv:'+c.v.id]||0)*2+(c.v.auto?0:0.5);});
   cands.sort((a,b)=>a.score-b.score);
   return 'srv:'+cands[0].v.id;
 }
@@ -679,8 +680,16 @@ function renderCards(force){
     const vtSel=mkSel([['','— choose a voice type —'],...Object.keys(VT).map(k=>[k,VT[k].l])],f.vtype||'',v=>{setVoiceType(n,v);renderCards(true);});
     card.appendChild(row('Voice type',vtSel));
     const vopts=[['','Auto (best available voice)'],['blip','Blip sounds (use for Luganda)']];
+    const lgOf=v=>String(v.lang||'').split('-')[0].toLowerCase(),lgs={};
+    srvVoices.forEach(v=>{const k=lgOf(v);lgs[k]=(lgs[k]||0)+1;});
+    if(Object.keys(lgs).length>1){ // filter the long voice list by language
+      let dn=null;try{dn=new Intl.DisplayNames(['en'],{type:'language'});}catch(e){}
+      const nm=k=>{try{return k==='lug'?'Luganda':(dn&&dn.of(k))||k;}catch(e){return k;}};
+      const lopts=[['','All languages ('+srvVoices.length+' voices)'],...Object.keys(lgs).sort((a,b)=>(a==='lug'?-1:b==='lug'?1:a==='en'?-1:b==='en'?1:nm(a).localeCompare(nm(b)))).map(k=>[k,nm(k)+' ('+lgs[k]+')'])];
+      card.appendChild(row('Voice language',mkSel(lopts,f.vlang||'',v=>{f.vlang=v;renderCards(true);})));
+    }
     [['F','👩'],['M','👨'],['','❔']].forEach(([g,ic])=>{
-      srvVoices.filter(v=>tagOf(v).g===g).forEach(v=>vopts.push(['srv:'+v.id,'★ '+ic+' '+v.label+(voiceDesc(v)?' · '+voiceDesc(v):' · not sorted yet')]));
+      srvVoices.filter(v=>tagOf(v).g===g&&(!f.vlang||lgOf(v)===f.vlang||f.voice==='srv:'+v.id)).forEach(v=>vopts.push(['srv:'+v.id,'★ '+ic+' '+v.label+(voiceDesc(v)?' · '+voiceDesc(v):' · not sorted yet')]));
     });
     voices.forEach(v=>vopts.push([v.voiceURI,v.name+' ('+v.lang+')']));
     card.appendChild(row('Voice',mkSel(vopts,f.voice,v=>f.voice=v)));

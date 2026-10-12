@@ -51,7 +51,13 @@ const esc = s => s.replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&
 /* ---- voice catalogue ---- */
 // Best first. These are East African / African English voices that suit Ugandan audiences, alternating male/female.
 const AUTO_ORDER = ['en-KE-ChilembaNeural', 'en-KE-AsiliaNeural', 'en-TZ-ElimuNeural', 'en-TZ-ImaniNeural', 'en-NG-AbeoNeural', 'en-NG-EzinneNeural', 'en-US-GuyNeural', 'en-US-JennyNeural'];
-const KEEP = /^(en-(KE|TZ|NG|ZA|US|GB|AU|IN)|sw-)/;
+// All languages by default (hundreds of voices). To limit them put e.g.  VOICE_LANGS=^(en-|sw-|fr-)  in .env
+let KEEP = /./;
+try { if (process.env.VOICE_LANGS) KEEP = new RegExp(process.env.VOICE_LANGS, 'i'); } catch (e) { /* bad pattern: keep all */ }
+let LANGNAMES = null;
+function langName(loc) {
+  try { LANGNAMES = LANGNAMES || new Intl.DisplayNames(['en'], { type: 'language' }); return LANGNAMES.of(loc) || loc; } catch (e) { return loc; }
+}
 const FALLBACK = [
   ['en-KE-ChilembaNeural', 'Male'], ['en-KE-AsiliaNeural', 'Female'], ['en-TZ-ElimuNeural', 'Male'], ['en-TZ-ImaniNeural', 'Female'],
   ['en-NG-AbeoNeural', 'Male'], ['en-NG-EzinneNeural', 'Female'], ['en-US-GuyNeural', 'Male'], ['en-US-JennyNeural', 'Female'],
@@ -64,7 +70,7 @@ function normalize(list) {
     .filter(v => /Neural$/.test(v.ShortName) && KEEP.test(v.ShortName))
     .map(v => {
       const name = v.ShortName.split('-').slice(2).join('-').replace(/Neural$/, '');
-      return { id: v.ShortName, lang: v.Locale, gender: v.Gender, label: `${name} (${v.Locale}, ${v.Gender})`, auto: AUTO_ORDER.includes(v.ShortName) };
+      return { id: v.ShortName, lang: v.Locale, gender: v.Gender, label: `${name} · ${langName(v.Locale)} · ${v.Gender}`, auto: AUTO_ORDER.includes(v.ShortName) };
     });
   const rank = v => { const i = AUTO_ORDER.indexOf(v.id); return i >= 0 ? i : 100; };
   return out.sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id));
@@ -74,18 +80,24 @@ let voiceCache = null;
 async function getVoices() {
   if (voiceCache) return voiceCache;
   const sb = SB_KEY ? SB_VOICES : [];
-  if (PROVIDER === 'none' || PROVIDER === 'sunbird') return (voiceCache = sb);
+  // Sunbird (Luganda) plus the Microsoft voices of many languages, so characters can speak Luganda, English, Swahili, French and more.
+  // The unofficial Edge list is on while testing on your own computer; set EDGE_VOICES=1 to keep it on in production, EDGE_VOICES=0 to turn it off.
+  const withEdge = (PROVIDER === 'sunbird' || PROVIDER === 'none') && (process.env.EDGE_VOICES === '1' || (process.env.EDGE_VOICES !== '0' && !IS_PROD));
+  if ((PROVIDER === 'none' || PROVIDER === 'sunbird') && !withEdge) return (voiceCache = sb);
+  const prov = withEdge ? 'edge' : PROVIDER;
   let raw = null;
   try {
-    if (PROVIDER === 'azure') {
+    if (prov === 'azure') {
       const r = await fetch(`https://${REGION}.tts.speech.microsoft.com/cognitiveservices/voices/list`, { headers: { 'Ocp-Apim-Subscription-Key': KEY } });
       if (r.ok) raw = await r.json();
-    } else if (PROVIDER === 'edge') {
+    } else if (prov === 'edge') {
       const { MsEdgeTTS } = require('msedge-tts');
-      raw = await new MsEdgeTTS().getVoices();
+      raw = await Promise.race([new MsEdgeTTS().getVoices(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))]);
     }
   } catch (e) { /* use fallback list */ }
-  voiceCache = normalize(raw && raw.length ? raw : FALLBACK).map(v => ({ ...v, prov: PROVIDER })).concat(sb);
+  voiceCache = withEdge
+    ? sb.concat(normalize(raw && raw.length ? raw : FALLBACK).map(v => ({ ...v, prov, auto: false })))
+    : normalize(raw && raw.length ? raw : FALLBACK).map(v => ({ ...v, prov: PROVIDER })).concat(sb);
   return voiceCache;
 }
 
