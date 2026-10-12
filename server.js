@@ -194,6 +194,7 @@ const SCRIPT_GUIDE = [
   'Name (emotion): words        emotions: neutral, happy, angry, sad, shocked, scared, laugh, sleepy, love',
   'Name (angry, walk to Mama): words      movement while talking: walk/run to left|right|center|door|gate|tree|table|bench|<other character name>, or "run away from <name>"',
   'Name (interrupts): words     cuts off the previous speaker (use after someone else spoke)',
+  '[Rex is a real dog]   makes a realistic four-legged animal (real dog, cat, goat, cow, horse, zebra, sheep, pig, rabbit, lion, elephant, giraffe; also chicken, duck; say "real" before the animal). Animals walk, run, sit, play, eat and talk like characters: [Rex runs to Kato] [Rex sits] [Rex plays] [Rex eats]',
   'Kato & Nakato: Yes!   /   Everyone: Thank you!   several characters speak the same words together (answering a question as a group)',
   'Kato (sings): your own original lyrics   the character sings them on a made-up melody. Optional: [song: afrobeat 110] before it (styles: pop, afrobeat, gospel, lullaby, rock, opera) and Kato (rap): words for a rap with a beat. Always write ORIGINAL lyrics, never copy real songs.',
   'Name (beat): words           short comic pause first',
