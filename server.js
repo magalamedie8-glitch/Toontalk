@@ -318,7 +318,7 @@ app.post('/api/tts', async (req, res) => {
     }
     res.type(ext === 'wav' ? 'audio/wav' : 'audio/mpeg').sendFile(file);
   } catch (e) {
-    console.error('TTS failed:', e.message);
+    console.error('TTS failed [' + (req.body && req.body.voice) + ']:', e.message);
     const detail = String(e.message || '').replace(/Bearer\s+\S+/g, '').slice(0, 180);
     res.status(502).json({ error: 'Voice generation failed.', detail });
   }
