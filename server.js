@@ -92,7 +92,7 @@ async function getVoices() {
       if (r.ok) raw = await r.json();
     } else if (prov === 'edge') {
       const { MsEdgeTTS } = require('msedge-tts');
-      raw = await Promise.race([new MsEdgeTTS().getVoices(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))]);
+      raw = await Promise.race([new MsEdgeTTS().getVoices(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))]);
     }
   } catch (e) { /* use fallback list */ }
   voiceCache = withEdge
@@ -120,6 +120,9 @@ async function synthAzure(v, text, r, p) {
   return Buffer.from(await res.arrayBuffer());
 }
 async function synthEdge(v, text, r, p) {
+  try { return await synthEdgeOnce(v, text, r, p); } catch (e) { await new Promise(x => setTimeout(x, 700)); return synthEdgeOnce(v, text, r, p); } // the free Edge service drops connections now and then: one quick retry
+}
+async function synthEdgeOnce(v, text, r, p) {
   const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
   const tts = new MsEdgeTTS();
   try {
@@ -130,7 +133,7 @@ async function synthEdge(v, text, r, p) {
       audioStream.on('data', d => chunks.push(d));
       audioStream.on('close', resolve);
       audioStream.on('error', reject);
-      setTimeout(() => reject(new Error('edge timeout')), 20000);
+      setTimeout(() => reject(new Error('edge timeout (no answer from the Microsoft voice service)')), 12000);
     });
     const buf = Buffer.concat(chunks);
     if (!buf.length) throw new Error('edge returned no audio');
@@ -294,7 +297,7 @@ app.post('/api/script', limited, async (req, res) => {
 });
 
 const inflight = new Map();
-app.post('/api/tts', limited, async (req, res) => {
+app.post('/api/tts', async (req, res) => {
   try {
     const { text, voice, rate = 1, pitch = 1 } = req.body || {};
     if (typeof text !== 'string' || !text.trim() || text.length > 400) return res.status(400).json({ error: 'Text must be 1 to 400 characters.' });
@@ -305,6 +308,9 @@ app.post('/api/tts', limited, async (req, res) => {
     const ext = isWav(v) ? 'wav' : 'mp3';
     const file = path.join(CACHE, key + '.' + ext);
     if (!fs.existsSync(file)) {
+      // only new voice generations count towards the limit (replaying saved lines is free)
+      const n = (hits.get(req.ip) || 0) + 1; hits.set(req.ip, n);
+      if (n > 150) return res.status(429).json({ error: 'Too many new voice lines in one minute. Wait a minute and press Play again.', detail: 'rate limit' });
       if (!inflight.has(key)) {
         inflight.set(key, synth[v.prov](v, text, r, p).then(buf => { fs.writeFileSync(file, buf); }).finally(() => inflight.delete(key)));
       }
@@ -313,7 +319,8 @@ app.post('/api/tts', limited, async (req, res) => {
     res.type(ext === 'wav' ? 'audio/wav' : 'audio/mpeg').sendFile(file);
   } catch (e) {
     console.error('TTS failed:', e.message);
-    res.status(502).json({ error: 'Voice generation failed.' });
+    const detail = String(e.message || '').replace(/Bearer\s+\S+/g, '').slice(0, 180);
+    res.status(502).json({ error: 'Voice generation failed.', detail });
   }
 });
 
@@ -373,5 +380,6 @@ app.listen(PORT, () => {
   if (PROVIDER === 'edge') console.log('NOTE: "edge" is an unofficial service for local testing only. Set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION before you release the app.');
   if (PROVIDER === 'none') console.log('No voice provider set. Add SUNBIRD_API_KEY (Luganda) or AZURE_SPEECH_KEY and AZURE_SPEECH_REGION to .env');
   if (SB_KEY) console.log('Sunbird Luganda voices: on');
+  getVoices().then(v => console.log('Voices ready: ' + v.length)).catch(() => {}); // loads the voice list now so the first page open is quick
   console.log(AI_KEY ? 'AI script helper: on (' + AI_MODEL + ')' : 'AI script helper: basic offline mode (add ANTHROPIC_API_KEY for real writing)');
 });

@@ -115,6 +115,9 @@
   #voiceLab .vl-n small{display:block;font-weight:400;opacity:.6}
   #voiceLab .vl-r select{flex:0 0 auto;width:auto;min-width:92px;padding:8px;font-size:13px}
   #voiceLab .vl-r button{flex:0 0 auto;padding:10px 14px;background:#69db7c}
+  #voiceLab .vl-h{font-size:16px;font-weight:800;color:#ffd43b;margin-top:6px}
+  #voiceLab .vl-c{font-size:13px;font-weight:700;opacity:.85;margin-top:2px}
+  #voiceLab input[type=search]{padding:9px}
   @media (max-width:520px){#voiceLab .vl-r{flex-wrap:wrap}}
   #kindEd{position:fixed;inset:0;background:#12121a;z-index:47;overflow:auto;padding:14px}
   #kindEd .kd-w{max-width:760px;margin:0 auto}
@@ -231,7 +234,7 @@ Mama (love): Okay okay, I will make you both chapati.</textarea>
 </div>
 <div id="voiceLab" hidden><div class="vl-w">
   <div style="display:flex;gap:8px;align-items:center"><b style="font-size:18px;flex:1">🎧 Voice lab</b><button id="vlClose" style="flex:0 0 auto;background:#adb5bd">✕ Close</button></div>
-  <div class="hint">Press ▶ to listen, then say whether it is a woman or a man, and how old it sounds. ToonTalk remembers this and uses it when you pick a voice type such as Baby, Teenager or Grandmother on a character. Voices you leave on "?" are used for any type.</div>
+  <div class="hint">Press ▶ to listen. Use ☆ Save to keep the voices you like for a girl, boy, grandfather, animal... (they appear on every character card). You can also say whether it is a woman or a man, and how old it sounds. ToonTalk remembers this and uses it when you pick a voice type such as Baby, Teenager or Grandmother on a character. Voices you leave on "?" are used for any type.</div>
   <div id="vlList"></div>
 </div></div>
 <div id="kindEd" hidden><div class="kd-w">
@@ -409,14 +412,39 @@ function resolveSrv(f,i){
   if(f.voice.startsWith('srv:'))return srvVoices.find(v=>'srv:'+v.id===f.voice)||null;
   return null;
 }
+const VOICE_CACHE=new Map(); // lines already made this session play again instantly
 async function fetchLine(s,sv){
   const f=cfg[s.who],e=EMO[s.emo];
-  const r=await fetch(API+'/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({text:s.text,voice:sv.id,rate:clamp(rateNow()*e.rate,0.5,2),pitch:clamp(f.pitch*e.pitch,0.5,2)})});
-  if(!r.ok)throw new Error('tts '+r.status);
-  s.buf=await actx.decodeAudioData(await r.arrayBuffer());
-  if(sv.prov==='sunbird'&&f.vtype)s.buf=resampleBuf(s.buf,voiceFactor(f,sv));
-  try{s.vis=analyzeVisemes(s.buf);}catch(e){s.vis=null;}
+  const rate=clamp(rateNow()*e.rate,0.5,2),pitch=clamp(f.pitch*e.pitch,0.5,2),fac=(sv.prov==='sunbird'&&f.vtype)?voiceFactor(f,sv):1;
+  const ck=[sv.id,s.text,rate.toFixed(2),pitch.toFixed(2),fac.toFixed(2)].join('|');
+  const hit=VOICE_CACHE.get(ck);
+  if(hit){s.buf=hit.buf;s.vis=hit.vis;return;}
+  let last=null;
+  for(let tries=0;tries<3;tries++){ // a slow or dropped connection gets two more chances
+    try{
+      const r=await fetch(API+'/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:s.text,voice:sv.id,rate,pitch})});
+      if(!r.ok){let d='';try{const j=await r.json();d=j.detail||j.error||'';}catch(x){}const er=new Error('tts '+r.status+(d?' - '+d:''));er.status=r.status;throw er;}
+      let buf=await actx.decodeAudioData(await r.arrayBuffer());
+      if(fac!==1)buf=resampleBuf(buf,fac);
+      let vis=null;try{vis=analyzeVisemes(buf);}catch(x){}
+      s.buf=buf;s.vis=vis;
+      if(VOICE_CACHE.size>300)VOICE_CACHE.delete(VOICE_CACHE.keys().next().value);
+      VOICE_CACHE.set(ck,{buf,vis});
+      return;
+    }catch(er){last=er;if(er.status===400||er.status===401||er.status===403)break;await new Promise(x=>setTimeout(x,tries?1600:600));}
+  }
+  throw last||new Error('tts failed');
+}
+function voiceWhy(m){ // plain-language reason for a failed voice line
+  m=String(m||'');
+  if(/401|403|unauthor/i.test(m))return 'the voice key was refused (the Sunbird token may have expired: make a new one and put it in .env)';
+  if(/429|too many|rate/i.test(m))return 'too many voice requests at once, wait a minute and press Play again';
+  if(/timeout|timed out|abort/i.test(m))return 'the voice service took too long to answer';
+  if(/edge|microsoft/i.test(m))return 'the free Microsoft voice service did not answer (it is unofficial and drops connections; try again or use another voice)';
+  if(/sunbird/i.test(m))return 'Sunbird did not answer ('+m.slice(0,90)+')';
+  if(/Failed to fetch|NetworkError|Load failed/i.test(m))return 'the app could not reach your voice server (is npm start still running?)';
+  return m.slice(0,100)||'unknown reason';
 }
 async function prepareVoices(){
   const jobs=[];
@@ -424,17 +452,17 @@ async function prepareVoices(){
     [s,...(s.co||[])].forEach(x=>{const sv=resolveSrv(cfg[x.who],chars[x.who].i);if(sv)jobs.push({s:x,sv});});
   });
   if(!jobs.length)return;
-  let done=0,failed=0,k=0;
+  let done=0,failed=0,k=0;const why={};
   const upd=()=>{$('status').textContent='Preparing voices '+done+'/'+jobs.length+(failed?' ('+failed+' failed, using backup voice)':'')+'...';};
   upd();
   await Promise.all(Array.from({length:4},async()=>{
     while(k<jobs.length){
       const j=jobs[k++];
-      try{await fetchLine(j.s,j.sv);}catch(e){failed++;j.s.buf=null;}
+      try{await fetchLine(j.s,j.sv);}catch(e){failed++;j.s.buf=null;const w=voiceWhy(e.message);why[w]=(why[w]||0)+1;}
       done++;upd();
     }
   }));
-  $('status').textContent=failed?(failed+' line(s) are using the backup voice.'):'';
+  $('status').textContent=failed?(failed+' line(s) are using the backup voice because '+Object.keys(why).join('; ')+'.'):'';
 }
 
 /* ---------- parse script ---------- */
@@ -679,6 +707,14 @@ function renderCards(force){
     card.appendChild(row('Colors',mkIn('color',f.skin,v=>f.skin=v),mkIn('color',f.outfit,v=>f.outfit=v)));
     const vtSel=mkSel([['','— choose a voice type —'],...Object.keys(VT).map(k=>[k,VT[k].l])],f.vtype||'',v=>{setVoiceType(n,v);renderCards(true);});
     card.appendChild(row('Voice type',vtSel));
+    { // favorite voices in one tap
+      const own=f.vtype&&VT[f.vtype]?f.vtype:((f.style==='animal'||kindOf(f))?'animal':'');
+      const cats=FAVCATS.slice().sort((a,b)=>(a[0]===own?-1:b[0]===own?1:0));
+      const fo=[['','— choose a favorite —']];
+      cats.forEach(([k,lab])=>(favVoices[k]||[]).forEach(id=>{const v=srvVoices.find(x=>x.id===id);if(v)fo.push([k+'|'+id,lab+' · '+v.label]);}));
+      if(fo.length>1)card.appendChild(row('⭐ Favorite voice',mkSel(fo,'',val=>{const [k,id]=val.split('|');if(id)applyFavorite(n,k,id);renderCards(true);})));
+      else if(srvVoices.length){const fb=document.createElement('button');fb.textContent='⭐ Save favorite voices';fb.onclick=()=>{vlRender();$('voiceLab').hidden=false;};card.appendChild(row('⭐ Favorites',fb));}
+    }
     const vopts=[['','Auto (best available voice)'],['blip','Blip sounds (use for Luganda)']];
     const lgOf=v=>String(v.lang||'').split('-')[0].toLowerCase(),lgs={};
     srvVoices.forEach(v=>{const k=lgOf(v);lgs[k]=(lgs[k]||0)+1;});
@@ -3124,20 +3160,75 @@ async function vlPlay(v,btn){
     src.onended=()=>{btn.textContent=old;};btn.textContent='🔊';
   }catch(e){btn.textContent=old;alert('Could not play this voice. Is the server running?');}
 }
+/* ---------- favorite voices: save the voices you like for a girl, boy, grandfather, animal... and pick them in one tap ---------- */
+const FAVCATS=[['girl','👧 Girl'],['boy','👦 Boy'],['tgirl','🧑 Teen girl'],['tboy','🧑 Teen boy'],['woman','👩 Woman'],['man','👨 Man'],['gma','👵 Grandmother'],['gpa','👴 Grandfather'],['baby','👶 Baby'],['animal','🐾 Animal'],['narr','🎙 Narrator / other']];
+let favVoices={};try{favVoices=JSON.parse(localStorage.getItem('toontalk-favvoices')||'{}')||{};}catch(e){}
+function saveFavs(){try{localStorage.setItem('toontalk-favvoices',JSON.stringify(favVoices));}catch(e){}}
+function favAdd(cat,id){const a=favVoices[cat]||(favVoices[cat]=[]);if(!a.includes(id))a.push(id);saveFavs();}
+function favDel(cat,id){favVoices[cat]=(favVoices[cat]||[]).filter(x=>x!==id);saveFavs();}
+function favLabelsOf(id){return FAVCATS.filter(([k])=>(favVoices[k]||[]).includes(id)).map(x=>x[1]);}
+function favCount(){return FAVCATS.reduce((n,[k])=>n+(favVoices[k]||[]).filter(id=>srvVoices.some(v=>v.id===id)).length,0);}
+function applyFavorite(name,cat,id){
+  const f=cfg[name],sv=srvVoices.find(v=>v.id===id);if(!f||!sv)return;
+  f.voice='srv:'+id;
+  if(VT[cat]){f.vtype=cat;f.pitch=clamp(+(AGEF[VT[cat].age]/AGEF[tagOf(sv).a]).toFixed(2),0.5,2);}
+  else{f.vtype='';f.pitch=1;}
+  save();
+}
+let vlQ='',vlLang='';
 function vlRender(){
   const box=$('vlList');box.innerHTML='';
   if(!srvVoices.length){box.innerHTML='<div class="hint">No natural voices found. Start the server (npm start) with a Sunbird or Azure key, or set the server address under ⚙ Server settings.</div>';return;}
-  srvVoices.forEach(v=>{
-    const t=tagOf(v),r=document.createElement('div');r.className='vl-r';
-    const nm=document.createElement('div');nm.className='vl-n';nm.innerHTML='';nm.textContent=v.label;
-    const sm=document.createElement('small');sm.textContent=(v.lang||'')+(v.prov?' · '+v.prov:'');nm.appendChild(sm);
-    const pb=document.createElement('button');pb.textContent='▶';pb.onclick=()=>vlPlay(v,pb);
-    const gs=document.createElement('select');[['','?'],['F','Woman'],['M','Man']].forEach(([a,b])=>{const o=document.createElement('option');o.value=a;o.textContent=b;gs.appendChild(o);});gs.value=t.g;
-    const as=document.createElement('select');AGES.forEach(([a,b])=>{const o=document.createElement('option');o.value=a;o.textContent=b;as.appendChild(o);});as.value=t.a;
-    const upd=()=>{voiceTags[v.id]={g:gs.value,a:as.value};saveTags();renderCards(true);};
-    gs.onchange=upd;as.onchange=upd;
-    r.append(nm,pb,gs,as);box.appendChild(r);
+  const mkBtn=(t,cb,bg)=>{const b=document.createElement('button');b.textContent=t;b.onclick=cb;if(bg)b.style.background=bg;return b;};
+  // 1. my favorites, by kind of character
+  const fh=document.createElement('div');fh.className='vl-h';fh.textContent='⭐ My favorite voices';box.appendChild(fh);
+  let any=false;
+  FAVCATS.forEach(([k,lab])=>{
+    const ids=(favVoices[k]||[]).map(id=>srvVoices.find(v=>v.id===id)).filter(Boolean);
+    if(!ids.length)return;any=true;
+    const h=document.createElement('div');h.className='vl-c';h.textContent=lab;box.appendChild(h);
+    ids.forEach(v=>{
+      const r=document.createElement('div');r.className='vl-r';
+      const nm=document.createElement('div');nm.className='vl-n';nm.textContent=v.label;const sm=document.createElement('small');sm.textContent=(v.lang||'')+(v.prov?' · '+v.prov:'');nm.appendChild(sm);
+      const pb=document.createElement('button');pb.textContent='▶';pb.onclick=()=>vlPlay(v,pb);
+      r.append(nm,pb,mkBtn('✕',()=>{favDel(k,v.id);vlRender();renderCards(true);},'#ffa8a8'));box.appendChild(r);
+    });
   });
+  if(!any){const d=document.createElement('div');d.className='hint';d.textContent='Nothing saved yet. Listen to the voices below and press ☆ Save to choose who it suits: girl, boy, grandfather, animal... Saved voices then appear in one tap on every character card.';box.appendChild(d);}
+  // 2. all voices, with search and language filter
+  const ah=document.createElement('div');ah.className='vl-h';ah.textContent='All voices';box.appendChild(ah);
+  const bar=document.createElement('div');bar.className='vl-r';
+  const q=document.createElement('input');q.type='search';q.placeholder='Search a name or language...';q.value=vlQ;q.style.flex='1 1 140px';
+  const lgOf=v=>String(v.lang||'').split('-')[0].toLowerCase();
+  let dn=null;try{dn=new Intl.DisplayNames(['en'],{type:'language'});}catch(e){}
+  const nmL=k=>{try{return k==='lug'?'Luganda':(dn&&dn.of(k))||k;}catch(e){return k;}};
+  const lgs={};srvVoices.forEach(v=>{const k=lgOf(v);lgs[k]=(lgs[k]||0)+1;});
+  const ls=document.createElement('select');[['','All languages'],...Object.keys(lgs).sort((a,b)=>(a==='lug'?-1:b==='lug'?1:a==='en'?-1:b==='en'?1:nmL(a).localeCompare(nmL(b)))).map(k=>[k,nmL(k)+' ('+lgs[k]+')'])].forEach(([a,b])=>{const o=document.createElement('option');o.value=a;o.textContent=b;ls.appendChild(o);});ls.value=vlLang;
+  bar.append(q,ls);box.appendChild(bar);
+  const list=document.createElement('div');list.style.cssText='display:flex;flex-direction:column;gap:8px';box.appendChild(list);
+  const draw=()=>{
+    list.innerHTML='';let shown=0;
+    srvVoices.forEach(v=>{
+      const hay=(v.label+' '+(v.lang||'')+' '+nmL(lgOf(v))).toLowerCase();
+      if(vlQ&&!hay.includes(vlQ.toLowerCase()))return;if(vlLang&&lgOf(v)!==vlLang)return;
+      if(++shown>150)return;
+      const t=tagOf(v),r=document.createElement('div');r.className='vl-r';
+      const nm=document.createElement('div');nm.className='vl-n';nm.textContent=v.label;
+      const sm=document.createElement('small');sm.textContent=(v.lang||'')+(v.prov?' · '+v.prov:'')+(favLabelsOf(v.id).length?' · ⭐ '+favLabelsOf(v.id).join(', '):'');nm.appendChild(sm);
+      const pb=document.createElement('button');pb.textContent='▶';pb.onclick=()=>vlPlay(v,pb);
+      const fs=document.createElement('select');[['','☆ Save…'],...FAVCATS.map(([k,l])=>[k,l])].forEach(([a,b])=>{const o=document.createElement('option');o.value=a;o.textContent=b;fs.appendChild(o);});
+      fs.onchange=()=>{if(fs.value){favAdd(fs.value,v.id);vlRender();renderCards(true);}};
+      const gs=document.createElement('select');[['','?'],['F','Woman'],['M','Man']].forEach(([a,b])=>{const o=document.createElement('option');o.value=a;o.textContent=b;gs.appendChild(o);});gs.value=t.g;
+      const as=document.createElement('select');AGES.forEach(([a,b])=>{const o=document.createElement('option');o.value=a;o.textContent=b;as.appendChild(o);});as.value=t.a;
+      const upd=()=>{voiceTags[v.id]={g:gs.value,a:as.value};saveTags();renderCards(true);};
+      gs.onchange=upd;as.onchange=upd;
+      r.append(nm,pb,fs,gs,as);list.appendChild(r);
+    });
+    if(shown>150){const d=document.createElement('div');d.className='hint';d.textContent='Showing the first 150 of '+shown+' voices. Use the search or pick a language to narrow the list.';list.appendChild(d);}
+    if(!shown){const d=document.createElement('div');d.className='hint';d.textContent='No voice matches that search.';list.appendChild(d);}
+  };
+  q.oninput=()=>{vlQ=q.value;draw();};ls.onchange=()=>{vlLang=ls.value;draw();};
+  draw();
 }
 $('btnLab').onclick=()=>{vlRender();$('voiceLab').hidden=false;};
 $('vlClose').onclick=()=>{if(vlAudio){try{vlAudio.stop();}catch(e){}}$('voiceLab').hidden=true;};
@@ -3761,3 +3852,4 @@ window.addEventListener('appinstalled',()=>{const b=document.getElementById('btn
 </script>
 </body>
 </html>
+
