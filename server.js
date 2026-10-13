@@ -195,6 +195,35 @@ const limited = (req, res, next) => {
 
 app.get('/api/health', (req, res) => res.json({ ok: true, provider: PROVIDER, sunbird: !!SB_KEY, ai: !!AI_KEY }));
 
+/* ---- Language Studio: speech-to-text for checking recordings (Sunbird, 51 languages incl. Luganda and Lusoga) ---- */
+app.post('/api/stt', express.raw({ type: () => true, limit: '10mb' }), async (req, res) => {
+  try {
+    if (!SB_KEY) return res.status(503).json({ error: 'Speech recognition is off: put SUNBIRD_API_KEY in your .env file and restart the server.' });
+    const lang = String(req.query.lang || '').toLowerCase();
+    if (!/^[a-z]{3}$/.test(lang)) return res.status(400).json({ error: 'Language code must be 3 letters, for example lug or xog.' });
+    const body = req.body;
+    if (!Buffer.isBuffer(body) || body.length < 200) return res.status(400).json({ error: 'No audio received.' });
+    const n = (hits.get(req.ip) || 0) + 1; hits.set(req.ip, n);
+    if (n > 60) return res.status(429).json({ error: 'Too many checks in one minute. Wait a minute and try again.' });
+    const type = String(req.headers['content-type'] || 'audio/wav').split(';')[0];
+    const ext = /wav/.test(type) ? 'wav' : /mp4|m4a|aac/.test(type) ? 'm4a' : /ogg/.test(type) ? 'ogg' : /mpeg|mp3/.test(type) ? 'mp3' : 'webm';
+    const fd = new FormData();
+    fd.append('audio', new Blob([body], { type }), 'clip.' + ext);
+    fd.append('language', lang);
+    const r = await fetch(SB_BASE + '/tasks/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + SB_KEY }, body: fd, signal: AbortSignal.timeout(90000) });
+    if (!r.ok) {
+      const t = (await r.text()).replace(/Bearer\s+\S+/g, '').slice(0, 160);
+      console.error('STT failed [' + lang + ']:', r.status, t);
+      return res.status(502).json({ error: 'Speech recognition failed (' + r.status + ').', detail: t });
+    }
+    const j = await r.json();
+    res.json({ text: String(j.audio_transcription || '').trim(), language: j.language || lang, seconds: j.duration_seconds || null, trimmed: !!j.was_audio_trimmed });
+  } catch (e) {
+    console.error('STT failed:', e.message);
+    res.status(502).json({ error: 'Could not reach the speech service.', detail: String(e.message || '').slice(0, 160) });
+  }
+});
+
 app.get('/api/voices', async (req, res) => {
   res.json({ provider: PROVIDER, voices: await getVoices() });
 });
@@ -213,7 +242,7 @@ const SCRIPT_GUIDE = [
   'Kato & Nakato: Yes!   /   Everyone: Thank you!   several characters speak the same words together (answering a question as a group)',
   'Kato (sings): your own original lyrics   the character sings them on a made-up melody. Optional: [song: afrobeat 110] before it (styles: pop, afrobeat, gospel, lullaby, rock, opera) and Kato (rap): words for a rap with a beat. Always write ORIGINAL lyrics, never copy real songs.',
   'Name (beat): words           short comic pause first',
-  '[scene: day]   places: day, sunset, night, home, classroom, market, village, street, compound, room, tree, hall',
+  '[scene: day]   places: day, sunset, night, home, classroom, market, village, street, compound, room, tree, hall, city, road, beach, lake, savannah, forest, shamba, park, taxipark, stadium, mountain',
   '[Name enters left]  [Name enters right]  [Name leaves left]  [Name leaves right]   (a character who enters first starts off stage)',
   '[Name walks to Mama]  [Name runs away from Mama]  [Name walks to the door]',
   '[Name waves] jumps dances points bows sits stands falls spins shrugs claps kicks cheers crouches nods salutes',

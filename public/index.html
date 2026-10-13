@@ -119,6 +119,24 @@
   #voiceLab .vl-c{font-size:13px;font-weight:700;opacity:.85;margin-top:2px}
   #voiceLab input[type=search]{padding:9px}
   @media (max-width:520px){#voiceLab .vl-r{flex-wrap:wrap}}
+  #langStudio{position:fixed;inset:0;background:#12121a;z-index:49;overflow:auto;padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+  #langStudio .vl-w{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+  #langStudio .vl-h{font-size:16px;font-weight:800;color:#ffd43b;margin-top:6px}
+  #langStudio .ls-card,#langStudio .ls-clip{background:#1a1a26;border:1px solid #2c2c3c;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+  #langStudio .ls-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  #langStudio .ls-row>input,#langStudio .ls-row>select{flex:1 1 150px;min-width:0}
+  #langStudio .ls-row>button{flex:1 1 auto;padding:10px 12px}
+  #langStudio .ls-con{display:flex;gap:8px;align-items:center;font-size:13px;opacity:.9}
+  #langStudio .ls-con input{width:auto;flex:0 0 auto}
+  #langStudio .ls-meter{height:8px;background:#2c2c3c;border-radius:6px;overflow:hidden}
+  #langStudio .ls-meter i{display:block;height:100%;width:0;background:#51cf66;transition:width .06s}
+  #langStudio .ls-res{background:#12121a;border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:6px}
+  #langStudio .ls-sc{font-weight:800}
+  #langStudio .ls-words{font-size:17px;line-height:1.8}
+  #langStudio .ls-w{padding:2px 6px;border-radius:6px}
+  #langStudio .ls-ok{background:#2b8a3e}#langStudio .ls-close{background:#e67700}#langStudio .ls-wrong{background:#c92a2a}
+  #langStudio .ls-ct{display:flex;gap:8px;align-items:center;justify-content:space-between;font-size:16px}
+  #langStudio .ls-badge{font-size:11px;font-weight:800;color:#111;padding:3px 8px;border-radius:99px;white-space:nowrap}
   #kindEd{position:fixed;inset:0;background:#12121a;z-index:47;overflow:auto;padding:14px}
   #kindEd .kd-w{max-width:760px;margin:0 auto}
   #kindEd .kd-h{font-weight:700;margin:16px 0 8px;color:#ffd43b}
@@ -209,6 +227,7 @@ Mama (love): Okay okay, I will make you both chapati.</textarea>
   <div class="hint">Characters in your script appear below. Pick a voice for each one. For <b>Luganda lines</b> choose “Blip sounds” (no browser has a Luganda voice yet), the words still show as subtitles.</div>
   <div class="hint" id="srvstat"></div>
   <button id="btnLab" style="background:#d0bfff">🎧 Voice lab: listen to the voices and sort them</button>
+  <button id="btnStudio" style="background:#ffa8a8">🎙️ Language Studio: record real speakers, check and keep accents</button>
   <div id="cards"></div>
   </div>
 </div>
@@ -238,6 +257,7 @@ Mama (love): Okay okay, I will make you both chapati.</textarea>
   <div class="hint">Press ▶ to listen. Use ☆ Save to keep the voices you like for a girl, boy, grandfather, animal... (they appear on every character card). You can also say whether it is a woman or a man, and how old it sounds. ToonTalk remembers this and uses it when you pick a voice type such as Baby, Teenager or Grandmother on a character. Voices you leave on "?" are used for any type.</div>
   <div id="vlList"></div>
 </div></div>
+<div id="langStudio" hidden><div class="vl-w" id="lsBody"></div></div>
 <div id="kindEd" hidden><div class="kd-w">
   <div style="display:flex;gap:8px;align-items:center"><b id="kindWho" style="font-size:18px;flex:1">Choose a character</b><button id="kindClose" style="flex:0 0 auto;background:#adb5bd">✕ Close</button></div>
   <div class="hint">Pick a type. Its colours are set for you and you can still change them on the character card.</div>
@@ -4152,6 +4172,222 @@ function vlRender(){
   q.oninput=()=>{vlQ=q.value;draw();};ls.onchange=()=>{vlLang=ls.value;draw();};
   draw();
 }
+/* ================= LANGUAGE STUDIO =================
+   Record or upload real speakers, check what a speech model hears, mark each clip Correct / Needs correction,
+   keep everything on this device (IndexedDB) and export a clean dataset (WAV 16 kHz + metadata) for training voices later. */
+const LS_LANGS=[['lug','Luganda'],['xog','Lusoga'],['nyn','Runyankole'],['ach','Acholi'],['teo','Ateso'],['lgg','Lugbara'],['kin','Kinyarwanda'],['swa','Swahili'],['eng','English']];
+const lsName=c=>(LS_LANGS.find(l=>l[0]===c)||[c,c.toUpperCase()])[1];
+let LSD=null,lsRec=null,lsAudio=null,lsFilter={lang:'',verdict:''},lsCache=[],lsBusy='';
+function lsDB(){return new Promise((ok,no)=>{try{const q=indexedDB.open('toontalk-studio',1);q.onupgradeneeded=()=>{q.result.createObjectStore('clips',{keyPath:'id'});};q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error);}catch(e){no(e);}});}
+async function lsAll(){const db=await lsDB();return new Promise((ok,no)=>{const r=db.transaction('clips').objectStore('clips').getAll();r.onsuccess=()=>ok((r.result||[]).sort((a,b)=>b.created-a.created));r.onerror=()=>no(r.error);});}
+async function lsPut(c){const db=await lsDB();return new Promise((ok,no)=>{const t=db.transaction('clips','readwrite');t.objectStore('clips').put(c);t.oncomplete=()=>ok();t.onerror=()=>no(t.error);});}
+async function lsDel(id){const db=await lsDB();return new Promise((ok,no)=>{const t=db.transaction('clips','readwrite');t.objectStore('clips').delete(id);t.oncomplete=()=>ok();t.onerror=()=>no(t.error);});}
+const lsNorm=t=>String(t||'').toLowerCase().normalize('NFC').replace(/[^\p{L}\p{N}\s']/gu,' ').replace(/’/g,"'").split(/\s+/).filter(Boolean);
+function lsLev(a,b){if(a===b)return 0;const m=a.length,n=b.length;if(!m||!n)return 1;let p=[];for(let j=0;j<=n;j++)p[j]=j;for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c;}return p[n]/Math.max(m,n);}
+/* compare the intended line with what the model heard: every target word becomes ok / close / wrong */
+function lsCompare(target,heard){
+  const T=lsNorm(target),H=lsNorm(heard);if(!T.length)return {words:[],score:0};
+  const n=T.length,m=H.length,D=[];for(let i=0;i<=n;i++){D[i]=new Array(m+1).fill(0);D[i][0]=i;}for(let j=0;j<=m;j++)D[0][j]=j;
+  for(let i=1;i<=n;i++)for(let j=1;j<=m;j++)D[i][j]=Math.min(D[i-1][j]+1,D[i][j-1]+1,D[i-1][j-1]+lsLev(T[i-1],H[j-1]));
+  const out=new Array(n);let i=n,j=m;
+  while(i>0){
+    if(j>0&&Math.abs(D[i][j]-(D[i-1][j-1]+lsLev(T[i-1],H[j-1])))<1e-9){const d=lsLev(T[i-1],H[j-1]);out[i-1]={w:T[i-1],h:H[j-1],s:d===0?'ok':d<=0.34?'close':'wrong'};i--;j--;}
+    else if(j>0&&Math.abs(D[i][j]-(D[i][j-1]+1))<1e-9){j--;}
+    else{out[i-1]={w:T[i-1],h:'',s:'wrong'};i--;}
+  }
+  const sc=out.reduce((a,x)=>a+(x.s==='ok'?1:x.s==='close'?0.5:0),0)/n;
+  return {words:out,score:Math.round(sc*100)};
+}
+async function lsDecode(blob){ensureAudio();return actx.decodeAudioData(await blob.arrayBuffer());}
+function lsWavBytes(buf,sr){ // mono 16-bit PCM
+  const ch=buf.getChannelData(0),n=ch.length,b=new ArrayBuffer(44+n*2),v=new DataView(b);
+  const W=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  W(0,'RIFF');v.setUint32(4,36+n*2,true);W(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);W(36,'data');v.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++){const x=Math.max(-1,Math.min(1,ch[i]));v.setInt16(44+i*2,x<0?x*0x8000:x*0x7fff,true);}
+  return new Uint8Array(b);
+}
+async function lsToWav(blob,sr){ // any recording -> mono WAV at sr Hz
+  const src=await lsDecode(blob);
+  const len=Math.max(1,Math.ceil(src.duration*sr));
+  const oc=new OfflineAudioContext(1,len,sr),node=oc.createBufferSource();node.buffer=src;node.connect(oc.destination);node.start();
+  return lsWavBytes(await oc.startRendering(),sr);
+}
+function lsPeaks(buf,n){const ch=buf.getChannelData(0),step=Math.max(1,Math.floor(ch.length/n)),p=[];for(let i=0;i<n;i++){let mx=0;for(let k=i*step;k<Math.min(ch.length,(i+1)*step);k+=4)mx=Math.max(mx,Math.abs(ch[k]));p.push(mx);}return p;}
+function lsDrawWave(cv,peaks){const x=cv.getContext('2d'),w=cv.width,h=cv.height;x.clearRect(0,0,w,h);x.fillStyle='#1a1a26';x.fillRect(0,0,w,h);if(!peaks)return;const mx=Math.max(0.05,...peaks);x.fillStyle='#74c0fc';peaks.forEach((p,i)=>{const bh=Math.max(2,p/mx*(h-8));x.fillRect(i*(w/peaks.length),(h-bh)/2,Math.max(1,w/peaks.length-1),bh);});}
+function lsStop(){if(lsAudio){try{lsAudio.pause();}catch(e){}lsAudio=null;}}
+function lsPlayBlob(blob,onend){lsStop();const u=URL.createObjectURL(blob),a=new Audio(u);lsAudio=a;a.onended=()=>{URL.revokeObjectURL(u);if(lsAudio===a)lsAudio=null;if(onend)onend();};a.onerror=()=>{if(onend)onend();};a.play().catch(()=>{if(onend)onend();});return a;}
+function lsMachineVoice(lang){return (srvVoices||[]).find(v=>v.prov==='sunbird'&&v.lang===lang)||null;}
+async function lsMachineBlob(text,lang){
+  const v=lsMachineVoice(lang);if(!v)throw new Error('There is no machine voice for '+lsName(lang)+' yet.');
+  const r=await fetch(API+'/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,voice:v.id,rate:1,pitch:1})});
+  if(!r.ok)throw new Error('The machine voice did not answer ('+r.status+').');
+  return r.blob();
+}
+async function lsTranscribe(blob,lang){
+  const wav=await lsToWav(blob,16000);
+  let r;try{r=await fetch(API+'/api/stt?lang='+encodeURIComponent(lang),{method:'POST',headers:{'Content-Type':'audio/wav'},body:wav});}catch(e){throw new Error('Cannot reach your ToonTalk server. Check that it is running and you are online. Recording and saving still work.');}
+  let j={};try{j=await r.json();}catch(e){}
+  if(!r.ok)throw new Error((j.error||'Speech recognition failed')+(j.detail?' ('+j.detail+')':''));
+  return j.text||'';
+}
+/* ---- zip (no compression) so the dataset can be downloaded as one file ---- */
+const LS_CRC=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function lsCrc(u8){let c=0xFFFFFFFF;for(let i=0;i<u8.length;i++)c=LS_CRC[(c^u8[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function lsZip(files){ // files: [{name, data:Uint8Array}]
+  const enc=new TextEncoder(),parts=[],cen=[];let off=0;
+  files.forEach(f=>{
+    const nm=enc.encode(f.name),crc=lsCrc(f.data),h=new DataView(new ArrayBuffer(30));
+    h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(8,0,true);h.setUint16(10,0,true);h.setUint16(12,0x21,true);h.setUint32(14,crc,true);h.setUint32(18,f.data.length,true);h.setUint32(22,f.data.length,true);h.setUint16(26,nm.length,true);h.setUint16(28,0,true);
+    parts.push(new Uint8Array(h.buffer),nm,f.data);
+    const c=new DataView(new ArrayBuffer(46));
+    c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint16(8,0x0800,true);c.setUint16(10,0,true);c.setUint16(12,0,true);c.setUint16(14,0x21,true);c.setUint32(16,crc,true);c.setUint32(20,f.data.length,true);c.setUint32(24,f.data.length,true);c.setUint16(28,nm.length,true);c.setUint32(42,off,true);
+    cen.push(new Uint8Array(c.buffer),nm);off+=30+nm.length+f.data.length;
+  });
+  const csz=cen.reduce((a,x)=>a+x.length,0),e=new DataView(new ArrayBuffer(22));
+  e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,csz,true);e.setUint32(16,off,true);
+  return new Blob([...parts,...cen,new Uint8Array(e.buffer)],{type:'application/zip'});
+}
+async function lsExport(onlyOk,note){
+  const all=(await lsAll()).filter(c=>c.blob&&(!onlyOk||c.verdict==='ok')).reverse();
+  if(!all.length)throw new Error(onlyOk?'No clips are marked Correct yet.':'There are no clips to export yet.');
+  const files=[],meta=[],js=[];const q=s=>String(s||'').replace(/[|\r\n]+/g,' ').trim();
+  for(let i=0;i<all.length;i++){
+    const c=all[i],name='wavs/'+String(i+1).padStart(4,'0')+'_'+c.lang+'.wav';
+    files.push({name,data:await lsToWav(c.blob,16000)});
+    meta.push([name.slice(5,-4),q(c.text),c.lang,q(c.speaker),q(c.accent),c.verdict||'',q(c.heard),c.score==null?'':c.score,c.consent?'yes':'no'].join('|'));
+    js.push({file:name,text:c.text,language:c.lang,speaker:c.speaker,accent:c.accent,verdict:c.verdict||'',heard_by_machine:c.heard||'',match_percent:c.score,consent:!!c.consent,seconds:c.dur,recorded:new Date(c.created).toISOString()});
+  }
+  const enc=new TextEncoder();
+  files.push({name:'metadata.csv',data:enc.encode('id|text|language|speaker|accent|verdict|machine_heard|match_percent|consent\n'+meta.join('\n')+'\n')});
+  files.push({name:'clips.json',data:enc.encode(JSON.stringify(js,null,1))});
+  files.push({name:'README.txt',data:enc.encode('ToonTalk Language Studio export\nAudio: mono 16-bit WAV, 16 kHz, in the wavs folder.\nmetadata.csv: one line per clip, fields separated by |.\nverdict: ok = a speaker confirmed it is correct, fix = needs correction, blank = not judged.\nOnly use clips whose speakers gave consent (consent column).\n'+(note||''))});
+  const blob=lsZip(files),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='toontalk-language-dataset-'+new Date().toISOString().slice(0,10)+'.zip';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
+  return all.length;
+}
+/* ---- recording ---- */
+async function lsStartRec(onLevel){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('This browser cannot record here. Open ToonTalk from its https address (or localhost).');
+  const st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+  const mt=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'].find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(t))||'';
+  const mr=mt?new MediaRecorder(st,{mimeType:mt}):new MediaRecorder(st),ch=[];
+  mr.ondataavailable=e=>{if(e.data&&e.data.size)ch.push(e.data);};
+  let an=null,raf=0,ac=null;
+  try{ac=new (window.AudioContext||window.webkitAudioContext)();const src=ac.createMediaStreamSource(st);an=ac.createAnalyser();an.fftSize=512;src.connect(an);const d=new Uint8Array(an.fftSize);const tick=()=>{an.getByteTimeDomainData(d);let m=0;for(let i=0;i<d.length;i++)m=Math.max(m,Math.abs(d[i]-128));onLevel&&onLevel(m/128);raf=requestAnimationFrame(tick);};tick();}catch(e){}
+  const t0=Date.now();
+  const done=new Promise(ok=>{mr.onstop=()=>{cancelAnimationFrame(raf);st.getTracks().forEach(t=>t.stop());try{ac&&ac.close();}catch(e){}ok({blob:new Blob(ch,{type:mr.mimeType||mt||'audio/webm'}),ms:Date.now()-t0});};});
+  mr.start();
+  const tm=setTimeout(()=>{try{mr.state!=='inactive'&&mr.stop();}catch(e){}},60000);
+  return {stop:()=>{clearTimeout(tm);try{mr.state!=='inactive'&&mr.stop();}catch(e){}return done;}};
+}
+/* ---- screen ---- */
+const lsEl=(t,p,kids)=>{const e=document.createElement(t);if(p){const {list,...rest}=p;Object.assign(e,rest);if(list)e.setAttribute('list',list);}(kids||[]).forEach(k=>e.appendChild(typeof k==='string'?document.createTextNode(k):k));return e;};
+function lsMsg(t,bad){const m=$('lsMsg');if(m){m.textContent=t||'';m.style.color=bad?'#ff8787':'#8ce99a';}}
+async function lsRender(keep){
+  const box=$('lsBody');if(!box)return;
+  const keepForm=keep?{lang:$('lsLang')&&$('lsLang').value,text:$('lsText')&&$('lsText').value,spk:$('lsSpk')&&$('lsSpk').value,acc:$('lsAcc')&&$('lsAcc').value,con:$('lsCon')&&$('lsCon').checked}:null;
+  try{lsCache=await lsAll();}catch(e){lsCache=[];}
+  box.innerHTML='';
+  const head=lsEl('div',{style:'display:flex;gap:8px;align-items:center'},[lsEl('b',{style:'font-size:18px;flex:1',textContent:'🎙️ Language Studio'}),lsEl('button',{id:'lsClose',textContent:'✕ Close',style:'flex:0 0 auto;background:#adb5bd'})]);
+  box.appendChild(head);
+  box.appendChild(lsEl('div',{className:'hint',textContent:'Record a speaker (or upload a clip), type the word or line they meant to say, then press Check. The machine tells you what it heard, and which words did not match. The machine is only a helper: the speaker decides if it is Correct. Everything is saved on this device. Always ask the speaker first.'}));
+  // --- new clip card
+  const card=lsEl('div',{className:'ls-card'});
+  const lang=lsEl('select',{id:'lsLang'});LS_LANGS.forEach(([c,n])=>lang.appendChild(lsEl('option',{value:c,textContent:n})));lang.appendChild(lsEl('option',{value:'_o',textContent:'Other language…'}));
+  lang.onchange=()=>{if(lang.value==='_o'){const c=(prompt('Type the 3-letter language code (for example: cgg, ttj, myx)')||'').trim().toLowerCase();if(/^[a-z]{3}$/.test(c)){if(![...lang.options].some(o=>o.value===c))lang.insertBefore(lsEl('option',{value:c,textContent:c.toUpperCase()}),lang.lastChild);lang.value=c;}else lang.value='lug';}lsSyncMachine();};
+  const text=lsEl('textarea',{id:'lsText',rows:2,placeholder:'The word or line the speaker is trying to say, written in the language',style:'width:100%'});
+  const spk=lsEl('input',{id:'lsSpk',placeholder:'Speaker name',list:'lsSpkList'});const sl=lsEl('datalist',{id:'lsSpkList'});[...new Set(lsCache.map(c=>c.speaker).filter(Boolean))].forEach(s=>sl.appendChild(lsEl('option',{value:s})));
+  const acc=lsEl('input',{id:'lsAcc',placeholder:'Accent / region (e.g. Busoga, Masaka)'});
+  const con=lsEl('label',{className:'ls-con'},[lsEl('input',{type:'checkbox',id:'lsCon'}),' The speaker agreed to be recorded and kept in my collection']);
+  card.append(lsEl('div',{className:'ls-row'},[lang]),text,lsEl('div',{className:'ls-row'},[spk,acc,sl]),con);
+  const meter=lsEl('div',{className:'ls-meter'},[lsEl('i',{id:'lsLvl'})]);
+  const wave=lsEl('canvas',{id:'lsWave',width:600,height:80,style:'width:100%;height:80px;border-radius:8px'});
+  const bRec=lsEl('button',{id:'lsRec',textContent:'⏺ Record',style:'background:#ff6b6b'});
+  const bUp=lsEl('button',{textContent:'📁 Upload audio',style:'background:#74c0fc'});
+  const fin=lsEl('input',{type:'file',accept:'audio/*',style:'display:none'});
+  const bPlay=lsEl('button',{id:'lsPlay',textContent:'▶ Play',disabled:true});
+  const bChk=lsEl('button',{id:'lsChk',textContent:'🧠 Check',disabled:true,style:'background:#ffd43b'});
+  const bSave=lsEl('button',{id:'lsSave',textContent:'💾 Save clip',disabled:true,style:'background:#69db7c'});
+  card.append(lsEl('div',{className:'ls-row'},[bRec,bUp,fin]),meter,wave,lsEl('div',{className:'ls-row'},[bPlay,bChk,bSave]),lsEl('div',{id:'lsRes'}),lsEl('div',{id:'lsMsg',className:'hint'}));
+  box.appendChild(card);
+  if(keepForm){if(keepForm.lang&&[...lang.options].some(o=>o.value===keepForm.lang))lang.value=keepForm.lang;text.value=keepForm.text||'';spk.value=keepForm.spk||'';acc.value=keepForm.acc||'';con.querySelector('input').checked=!!keepForm.con;}
+  lsDrawWave(wave,LSD&&LSD.peaks);lsShowRes();lsDraftBtns();
+  const setClip=async(blob,ms)=>{
+    lsMsg('');LSD={blob,mime:blob.type,dur:Math.round(ms)/1000,heard:'',score:null,verdict:'',peaks:null};
+    try{const b=await lsDecode(blob);LSD.dur=Math.round(b.duration*100)/100;LSD.peaks=lsPeaks(b,120);}catch(e){lsMsg('This audio could not be read. Try a .wav, .mp3 or .m4a file.',true);LSD=null;}
+    lsDrawWave(wave,LSD&&LSD.peaks);lsShowRes();lsDraftBtns();
+  };
+  bRec.onclick=async()=>{
+    if(lsRec){const r=await lsRec.stop();lsRec=null;bRec.textContent='⏺ Record';$('lsLvl').style.width='0';if(r.blob.size>500)await setClip(r.blob,r.ms);else lsMsg('Nothing was recorded. Try again.',true);return;}
+    try{lsStop();lsMsg('');lsRec=await lsStartRec(v=>{const l=$('lsLvl');if(l)l.style.width=Math.min(100,v*160)+'%';});bRec.textContent='⏹ Stop';}catch(e){lsRec=null;lsMsg(/denied|NotAllowed/i.test(e.name+e.message)?'The microphone is blocked. Allow it in the browser address bar and try again.':String(e.message||e),true);}
+  };
+  bUp.onclick=()=>fin.click();
+  fin.onchange=async()=>{const f=fin.files[0];if(f)await setClip(f,0);fin.value='';};
+  bPlay.onclick=()=>{if(!LSD)return;if(lsAudio){lsStop();bPlay.textContent='▶ Play';return;}bPlay.textContent='⏹ Stop';lsPlayBlob(LSD.blob,()=>{bPlay.textContent='▶ Play';});};
+  bChk.onclick=async()=>{
+    if(!LSD)return;if(!$('lsText').value.trim()){lsMsg('Type the word or line the speaker meant to say first.',true);return;}
+    bChk.disabled=true;bChk.textContent='Listening…';lsMsg('');
+    try{LSD.heard=await lsTranscribe(LSD.blob,$('lsLang').value);const c=lsCompare($('lsText').value,LSD.heard);LSD.score=c.score;lsShowRes();}
+    catch(e){lsMsg(String(e.message||e),true);}
+    bChk.textContent='🧠 Check';lsDraftBtns();
+  };
+  bSave.onclick=async()=>{
+    if(!LSD)return;const t=$('lsText').value.trim();if(!t){lsMsg('Type the word or line first.',true);return;}
+    const c={id:'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),created:Date.now(),lang:$('lsLang').value,text:t,speaker:$('lsSpk').value.trim(),accent:$('lsAcc').value.trim(),consent:$('lsCon').checked,mime:LSD.mime,blob:LSD.blob,dur:LSD.dur,heard:LSD.heard,score:LSD.score,verdict:LSD.verdict};
+    try{await lsPut(c);try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist();}catch(e){}LSD=null;$('lsText').value='';lsRender(true);setTimeout(()=>lsMsg('Saved ✓'),60);}catch(e){lsMsg('Could not save on this device: '+(e.message||e),true);}
+  };
+  // --- library
+  const tot=lsCache.reduce((a,c)=>a+(c.blob?c.blob.size:0),0);
+  box.appendChild(lsEl('div',{className:'vl-h',textContent:'My clips ('+lsCache.length+(lsCache.length?' · '+(tot/1048576).toFixed(1)+' MB':'')+')'}));
+  const fl=lsEl('select',{id:'lsFl'});fl.appendChild(lsEl('option',{value:'',textContent:'All languages'}));[...new Set(lsCache.map(c=>c.lang))].forEach(c=>fl.appendChild(lsEl('option',{value:c,textContent:lsName(c)})));fl.value=lsFilter.lang;fl.onchange=()=>{lsFilter.lang=fl.value;lsRender(true);};
+  const fv=lsEl('select',{id:'lsFv'});[['','All'],['ok','Correct'],['fix','Needs correction'],['unsure','Not sure'],['none','Not judged']].forEach(([v,n])=>fv.appendChild(lsEl('option',{value:v,textContent:n})));fv.value=lsFilter.verdict;fv.onchange=()=>{lsFilter.verdict=fv.value;lsRender(true);};
+  const onlyOk=lsEl('input',{type:'checkbox',id:'lsOnlyOk',checked:true});
+  const bExp=lsEl('button',{id:'lsExp',textContent:'⬇ Export dataset (.zip)',style:'background:#b197fc'});
+  bExp.onclick=async()=>{bExp.disabled=true;lsMsg('Preparing the file…');try{const n=await lsExport($('lsOnlyOk').checked);lsMsg('Exported '+n+' clip'+(n===1?'':'s')+' ✓');}catch(e){lsMsg(String(e.message||e),true);}bExp.disabled=false;};
+  box.appendChild(lsEl('div',{className:'ls-row'},[fl,fv]));
+  box.appendChild(lsEl('div',{className:'ls-row'},[lsEl('label',{className:'ls-con'},[onlyOk,' only clips marked Correct']),bExp]));
+  const list=lsCache.filter(c=>(!lsFilter.lang||c.lang===lsFilter.lang)&&(!lsFilter.verdict||(lsFilter.verdict==='none'?!c.verdict:c.verdict===lsFilter.verdict)));
+  if(!list.length)box.appendChild(lsEl('div',{className:'hint',textContent:lsCache.length?'No clips match this filter.':'No clips yet. Record or upload your first one above.'}));
+  list.forEach(c=>box.appendChild(lsClipRow(c)));
+  $('lsClose').onclick=()=>{lsStop();if(lsRec){try{lsRec.stop();}catch(e){}lsRec=null;}$('langStudio').hidden=true;};
+  lsSyncMachine();
+}
+function lsSyncMachine(){}
+function lsDraftBtns(){const has=!!LSD;['lsPlay','lsChk','lsSave'].forEach(i=>{const b=$(i);if(b)b.disabled=!has;});}
+function lsShowRes(){
+  const r=$('lsRes');if(!r)return;r.innerHTML='';if(!LSD||LSD.heard==null||(LSD.score==null&&!LSD.heard))return;
+  const c=lsCompare($('lsText')?$('lsText').value:'',LSD.heard);
+  r.appendChild(lsResBlock(c,LSD.heard));
+  const vb=lsEl('div',{className:'ls-row'},[['ok','✓ Correct','#69db7c'],['fix','✗ Needs correction','#ff8787'],['unsure','? Not sure','#adb5bd']].map(([v,n,col])=>{const b=lsEl('button',{textContent:n,style:'background:'+col+(LSD.verdict===v?';outline:3px solid #fff':'')});b.onclick=()=>{LSD.verdict=LSD.verdict===v?'':v;lsShowRes();};return b;}));
+  r.appendChild(vb);
+}
+function lsResBlock(c,heard){
+  const wrap=lsEl('div',{className:'ls-res'});
+  wrap.appendChild(lsEl('div',{className:'ls-sc',textContent:(heard?'Match: '+c.score+'%':'The machine heard nothing clear.')}));
+  const line=lsEl('div',{className:'ls-words'});
+  c.words.forEach(w=>{const sp=lsEl('span',{className:'ls-w ls-'+w.s,textContent:w.w});sp.title=w.s==='ok'?'heard correctly':w.h?'heard: '+w.h:'not heard';line.appendChild(sp);line.appendChild(document.createTextNode(' '));});
+  wrap.appendChild(line);
+  wrap.appendChild(lsEl('div',{className:'hint',textContent:'The machine heard: “'+(heard||'—')+'”'}));
+  return wrap;
+}
+function lsClipRow(c){
+  const row=lsEl('div',{className:'ls-clip'});
+  const vcol={ok:'#69db7c',fix:'#ff8787',unsure:'#adb5bd'}[c.verdict]||'#495057',vtxt={ok:'Correct',fix:'Needs correction',unsure:'Not sure'}[c.verdict]||'Not judged';
+  row.appendChild(lsEl('div',{className:'ls-ct'},[lsEl('b',{textContent:c.text}),lsEl('span',{className:'ls-badge',textContent:vtxt,style:'background:'+vcol})]));
+  row.appendChild(lsEl('div',{className:'hint',textContent:[lsName(c.lang),c.speaker,c.accent,(c.dur?c.dur.toFixed(1)+' s':''),c.consent?'consent ✓':'no consent noted'].filter(Boolean).join(' · ')}));
+  if(c.heard!=null&&c.heard!==''||c.score!=null){const cmp=lsCompare(c.text,c.heard||'');row.appendChild(lsResBlock(cmp,c.heard||''));}
+  const bar=lsEl('div',{className:'ls-row'});
+  const bP=lsEl('button',{textContent:'▶ Mine'});bP.onclick=()=>{if(lsAudio){lsStop();bP.textContent='▶ Mine';return;}bP.textContent='⏹';lsPlayBlob(c.blob,()=>{bP.textContent='▶ Mine';});};
+  bar.appendChild(bP);
+  if(lsMachineVoice(c.lang)){const bM=lsEl('button',{textContent:'🔊 Machine voice',style:'background:#ffa94d'});bM.onclick=async()=>{bM.textContent='…';try{const b=await lsMachineBlob(c.text,c.lang);lsPlayBlob(b,()=>{bM.textContent='🔊 Machine voice';});bM.textContent='🔊 Machine voice';}catch(e){bM.textContent='🔊 Machine voice';alert(e.message||e);}};bar.appendChild(bM);
+    const bB=lsEl('button',{textContent:'▶▶ Mine, then machine',style:'background:#ffe066'});bB.onclick=async()=>{bB.textContent='…';try{const b=await lsMachineBlob(c.text,c.lang);bB.textContent='▶ …';lsPlayBlob(c.blob,()=>{lsPlayBlob(b,()=>{bB.textContent='▶▶ Mine, then machine';});});}catch(e){bB.textContent='▶▶ Mine, then machine';alert(e.message||e);}};bar.appendChild(bB);}
+  [['ok','✓','#69db7c'],['fix','✗','#ff8787'],['unsure','?','#adb5bd']].forEach(([v,n,col])=>{const b=lsEl('button',{textContent:n,title:vtxt,style:'background:'+col+(c.verdict===v?';outline:3px solid #fff':'')});b.onclick=async()=>{c.verdict=c.verdict===v?'':v;await lsPut(c);lsRender(true);};bar.appendChild(b);});
+  const bC=lsEl('button',{textContent:'🧠 Re-check',style:'background:#ffd43b'});bC.onclick=async()=>{bC.textContent='…';try{c.heard=await lsTranscribe(c.blob,c.lang);c.score=lsCompare(c.text,c.heard).score;await lsPut(c);lsRender(true);}catch(e){bC.textContent='🧠 Re-check';alert(e.message||e);}};bar.appendChild(bC);
+  const bE=lsEl('button',{textContent:'✎ Edit text',style:'background:#a5d8ff'});bE.onclick=async()=>{const t=prompt('Correct the written word or line:',c.text);if(t!=null&&t.trim()){c.text=t.trim();if(c.heard)c.score=lsCompare(c.text,c.heard).score;await lsPut(c);lsRender(true);}};bar.appendChild(bE);
+  const bD=lsEl('button',{textContent:'🗑',title:'Delete',style:'background:#868e96'});bD.onclick=async()=>{if(confirm('Delete this clip from this device?')){await lsDel(c.id);lsRender(true);}};bar.appendChild(bD);
+  row.appendChild(bar);return row;
+}
+
+$('btnStudio').onclick=()=>{$('langStudio').hidden=false;lsRender();};
 $('btnLab').onclick=()=>{vlRender();$('voiceLab').hidden=false;};
 $('vlClose').onclick=()=>{if(vlAudio){try{vlAudio.stop();}catch(e){}}$('voiceLab').hidden=true;};
 let kindFor=null;
