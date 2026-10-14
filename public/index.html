@@ -135,6 +135,10 @@
   #langStudio .ls-words{font-size:17px;line-height:1.8}
   #langStudio .ls-w{padding:2px 6px;border-radius:6px}
   #langStudio .ls-ok{background:#2b8a3e}#langStudio .ls-close{background:#e67700}#langStudio .ls-wrong{background:#c92a2a}
+  #langStudio .ls-on{border-color:#69db7c}
+  #langStudio .ls-eps{font-size:13px}
+  #langStudio .ls-eps summary{cursor:pointer;padding:6px 0;color:#ffd43b;font-weight:700}
+  #langStudio .ls-ep{display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;background:#2c2c3c;color:#fff;font-size:13px}
   #langStudio .ls-ct{display:flex;gap:8px;align-items:center;justify-content:space-between;font-size:16px}
   #langStudio .ls-badge{font-size:11px;font-weight:800;color:#111;padding:3px 8px;border-radius:99px;white-space:nowrap}
   #kindEd{position:fixed;inset:0;background:#12121a;z-index:47;overflow:auto;padding:14px}
@@ -468,9 +472,10 @@ function voiceWhy(m){ // plain-language reason for a failed voice line
   return m.slice(0,100)||'unknown reason';
 }
 async function prepareVoices(){
-  const jobs=[];
+  const jobs=[];let recUsed=0,recTotal=0;
+  try{await lsPrepareRec();}catch(e){LS_REC=null;}
   segs.filter(s=>s.type==='line'&&!s.sing).forEach(s=>{
-    [s,...(s.co||[])].forEach(x=>{const sv=resolveSrv(cfg[x.who],chars[x.who].i);if(sv)jobs.push({s:x,sv});});
+    [s,...(s.co||[])].forEach(x=>{const rc=lsRecFor(x);if(cfg[x.who]&&cfg[x.who].accent)recTotal++;if(rc){recUsed++;jobs.push({s:x,rec:rc});return;}const sv=resolveSrv(cfg[x.who],chars[x.who].i);if(sv)jobs.push({s:x,sv});});
   });
   if(!jobs.length)return;
   let done=0,failed=0,k=0;const why={};
@@ -479,11 +484,11 @@ async function prepareVoices(){
   await Promise.all(Array.from({length:4},async()=>{
     while(k<jobs.length){
       const j=jobs[k++];
-      try{await fetchLine(j.s,j.sv);}catch(e){failed++;j.s.buf=null;const w=voiceWhy(e.message);why[w]=(why[w]||0)+1;}
+      try{if(j.rec)await lsRecLoad(j.s,j.rec);else await fetchLine(j.s,j.sv);}catch(e){failed++;j.s.buf=null;const w=voiceWhy(e.message);why[w]=(why[w]||0)+1;}
       done++;upd();
     }
   }));
-  $('status').textContent=failed?(failed+' line(s) are using the backup voice because '+Object.keys(why).join('; ')+'.'):'';
+  $('status').textContent=failed?(failed+' line(s) are using the backup voice because '+Object.keys(why).join('; ')+'.'):(recTotal?('Accent profile: '+recUsed+' of '+recTotal+' line(s) are played from your recordings, the rest use the voice you chose.'):'');
 }
 
 /* ---------- parse script ---------- */
@@ -746,6 +751,7 @@ function renderCards(force){
       const cats=FAVCATS.slice().sort((a,b)=>(a[0]===own?-1:b[0]===own?1:0));
       const fo=[['','— choose a favorite —']];
       cats.forEach(([k,lab])=>(favVoices[k]||[]).forEach(id=>{const v=srvVoices.find(x=>x.id===id);if(v)fo.push([k+'|'+id,lab+' · '+v.label]);}));
+            try{if(LS_PROFILES.length){const po=[['','None (use the voice above)'],...LS_PROFILES.map(p=>[p.id,p.name+' · '+lsName(p.lang)])];card.appendChild(row('🎙️ Accent profile (recorded lines)',mkSel(po,f.accent||'',val=>{f.accent=val;renderCards(true);})));}}catch(e){}
       if(fo.length>1)card.appendChild(row('⭐ Favorite voice',mkSel(fo,'',val=>{const [k,id]=val.split('|');if(id)applyFavorite(n,k,id);renderCards(true);})));
       else if(srvVoices.length){const fb=document.createElement('button');fb.textContent='⭐ Save favorite voices';fb.onclick=()=>{vlRender();$('voiceLab').hidden=false;};card.appendChild(row('⭐ Favorites',fb));}
     }
@@ -4177,11 +4183,19 @@ function vlRender(){
    keep everything on this device (IndexedDB) and export a clean dataset (WAV 16 kHz + metadata) for training voices later. */
 const LS_LANGS=[['lug','Luganda'],['xog','Lusoga'],['nyn','Runyankole'],['ach','Acholi'],['teo','Ateso'],['lgg','Lugbara'],['kin','Kinyarwanda'],['swa','Swahili'],['eng','English']];
 const lsName=c=>(LS_LANGS.find(l=>l[0]===c)||[c,c.toUpperCase()])[1];
-let LSD=null,lsRec=null,lsAudio=null,lsFilter={lang:'',verdict:''},lsCache=[],lsBusy='';
-function lsDB(){return new Promise((ok,no)=>{try{const q=indexedDB.open('toontalk-studio',1);q.onupgradeneeded=()=>{q.result.createObjectStore('clips',{keyPath:'id'});};q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error);}catch(e){no(e);}});}
+let LSD=null,lsRec=null,lsAudio=null,lsFilter={lang:'',verdict:'',profile:''},lsCache=[],lsBusy='';
+function lsDB(){return new Promise((ok,no)=>{try{const q=indexedDB.open('toontalk-studio',2);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains('clips'))d.createObjectStore('clips',{keyPath:'id'});if(!d.objectStoreNames.contains('profiles'))d.createObjectStore('profiles',{keyPath:'id'});};q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error);}catch(e){no(e);}});}
 async function lsAll(){const db=await lsDB();return new Promise((ok,no)=>{const r=db.transaction('clips').objectStore('clips').getAll();r.onsuccess=()=>ok((r.result||[]).sort((a,b)=>b.created-a.created));r.onerror=()=>no(r.error);});}
 async function lsPut(c){const db=await lsDB();return new Promise((ok,no)=>{const t=db.transaction('clips','readwrite');t.objectStore('clips').put(c);t.oncomplete=()=>ok();t.onerror=()=>no(t.error);});}
 async function lsDel(id){const db=await lsDB();return new Promise((ok,no)=>{const t=db.transaction('clips','readwrite');t.objectStore('clips').delete(id);t.oncomplete=()=>ok();t.onerror=()=>no(t.error);});}
+/* ---- accent profiles: one per language + region + speaker ---- */
+let LS_PROFILES=[];
+async function lsProfAll(){const db=await lsDB();return new Promise((ok,no)=>{const r=db.transaction('profiles').objectStore('profiles').getAll();r.onsuccess=()=>ok((r.result||[]).sort((a,b)=>a.created-b.created));r.onerror=()=>no(r.error);});}
+async function lsProfPut(p){const db=await lsDB();return new Promise((ok,no)=>{const t=db.transaction('profiles','readwrite');t.objectStore('profiles').put(p);t.oncomplete=()=>ok();t.onerror=()=>no(t.error);});}
+async function lsProfDel(id){const db=await lsDB();return new Promise((ok,no)=>{const t=db.transaction('profiles','readwrite');t.objectStore('profiles').delete(id);t.oncomplete=()=>ok();t.onerror=()=>no(t.error);});}
+async function lsLoadProfiles(){try{LS_PROFILES=await lsProfAll();}catch(e){LS_PROFILES=[];}return LS_PROFILES;}
+const lsProf=id=>LS_PROFILES.find(p=>p.id===id)||null;
+const lsKey=t=>lsNorm(t).join(' ');
 const lsNorm=t=>String(t||'').toLowerCase().normalize('NFC').replace(/[^\p{L}\p{N}\s']/gu,' ').replace(/’/g,"'").split(/\s+/).filter(Boolean);
 function lsLev(a,b){if(a===b)return 0;const m=a.length,n=b.length;if(!m||!n)return 1;let p=[];for(let j=0;j<=n;j++)p[j]=j;for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c;}return p[n]/Math.max(m,n);}
 /* compare the intended line with what the model heard: every target word becomes ok / close / wrong */
@@ -4247,22 +4261,63 @@ function lsZip(files){ // files: [{name, data:Uint8Array}]
   e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,csz,true);e.setUint32(16,off,true);
   return new Blob([...parts,...cen,new Uint8Array(e.buffer)],{type:'application/zip'});
 }
-async function lsExport(onlyOk,note){
-  const all=(await lsAll()).filter(c=>c.blob&&(!onlyOk||c.verdict==='ok')).reverse();
-  if(!all.length)throw new Error(onlyOk?'No clips are marked Correct yet.':'There are no clips to export yet.');
+async function lsExport(onlyOk,profileId){
+  const profs=LS_PROFILES.slice();
+  const all=(await lsAll()).filter(c=>c.blob&&(!onlyOk||c.verdict==='ok')&&(!profileId||c.profile===profileId)).reverse();
+  if(!all.length)throw new Error(onlyOk?'No clips are marked Correct yet'+(profileId?' in this profile':'')+'.':'There are no clips to export yet.');
   const files=[],meta=[],js=[];const q=s=>String(s||'').replace(/[|\r\n]+/g,' ').trim();
   for(let i=0;i<all.length;i++){
-    const c=all[i],name='wavs/'+String(i+1).padStart(4,'0')+'_'+c.lang+'.wav';
+    const c=all[i],pr=lsProf(c.profile),name='wavs/'+String(i+1).padStart(4,'0')+'_'+c.lang+'.wav';
     files.push({name,data:await lsToWav(c.blob,16000)});
-    meta.push([name.slice(5,-4),q(c.text),c.lang,q(c.speaker),q(c.accent),c.verdict||'',q(c.heard),c.score==null?'':c.score,c.consent?'yes':'no'].join('|'));
-    js.push({file:name,text:c.text,language:c.lang,speaker:c.speaker,accent:c.accent,verdict:c.verdict||'',heard_by_machine:c.heard||'',match_percent:c.score,consent:!!c.consent,seconds:c.dur,recorded:new Date(c.created).toISOString()});
+    meta.push([name.slice(5,-4),q(c.text),c.lang,q(pr?pr.name:''),q(c.speaker),q(c.accent),c.verdict||'',q(c.heard),c.score==null?'':c.score,c.consent?'yes':'no'].join('|'));
+    js.push({id:c.id,file:name,text:c.text,language:c.lang,profile:c.profile||'',speaker:c.speaker,accent:c.accent,verdict:c.verdict||'',heard_by_machine:c.heard||'',match_percent:c.score,consent:!!c.consent,seconds:c.dur,created:c.created});
   }
+  const used=new Set(all.map(c=>c.profile).filter(Boolean));
   const enc=new TextEncoder();
-  files.push({name:'metadata.csv',data:enc.encode('id|text|language|speaker|accent|verdict|machine_heard|match_percent|consent\n'+meta.join('\n')+'\n')});
+  files.push({name:'metadata.csv',data:enc.encode('id|text|language|profile|speaker|accent|verdict|machine_heard|match_percent|consent\n'+meta.join('\n')+'\n')});
   files.push({name:'clips.json',data:enc.encode(JSON.stringify(js,null,1))});
-  files.push({name:'README.txt',data:enc.encode('ToonTalk Language Studio export\nAudio: mono 16-bit WAV, 16 kHz, in the wavs folder.\nmetadata.csv: one line per clip, fields separated by |.\nverdict: ok = a speaker confirmed it is correct, fix = needs correction, blank = not judged.\nOnly use clips whose speakers gave consent (consent column).\n'+(note||''))});
-  const blob=lsZip(files),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='toontalk-language-dataset-'+new Date().toISOString().slice(0,10)+'.zip';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
+  files.push({name:'profiles.json',data:enc.encode(JSON.stringify(profs.filter(p=>used.has(p.id)),null,1))});
+  files.push({name:'README.txt',data:enc.encode('ToonTalk Language Studio export\nAudio: mono 16-bit WAV, 16 kHz, in the wavs folder.\nmetadata.csv: one line per clip, fields separated by |.\nverdict: ok = a speaker confirmed it is correct, fix = needs correction, blank = not judged.\nprofile: the accent profile (language + region + speaker) the clip belongs to.\nOnly use clips whose speakers gave consent (consent column).\nTo move this collection to another device: Language Studio > Import.\n')});
+  const blob=lsZip(files),a=document.createElement('a'),pr=lsProf(profileId);
+  a.href=URL.createObjectURL(blob);a.download='toontalk-'+(pr?pr.name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'-':'language-')+new Date().toISOString().slice(0,10)+'.zip';
+  document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
   return all.length;
+}
+/* read a zip made by this studio (stored, not compressed) and bring its profiles and clips back */
+function lsUnzip(u8){
+  const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength),dec=new TextDecoder(),out={};let o=0;
+  while(o+30<=u8.length&&dv.getUint32(o,true)===0x04034b50){
+    const meth=dv.getUint16(o+8,true),csz=dv.getUint32(o+18,true),nl=dv.getUint16(o+26,true),xl=dv.getUint16(o+28,true);
+    if(meth!==0)throw new Error('This zip was not made by Language Studio.');
+    const nm=dec.decode(u8.subarray(o+30,o+30+nl));out[nm]=u8.subarray(o+30+nl+xl,o+30+nl+xl+csz);o+=30+nl+xl+csz;
+  }
+  return out;
+}
+async function lsImport(file){
+  const z=lsUnzip(new Uint8Array(await file.arrayBuffer()));
+  if(!z['clips.json'])throw new Error('This file has no clips.json, so it is not a Language Studio export.');
+  const dec=new TextDecoder(),clips=JSON.parse(dec.decode(z['clips.json'])),profs=z['profiles.json']?JSON.parse(dec.decode(z['profiles.json'])):[];
+  const have=new Set((await lsAll()).map(c=>c.id)),haveP=new Set((await lsProfAll()).map(p=>p.id));
+  let np=0,nc=0;
+  for(const p of profs){if(p&&p.id&&!haveP.has(p.id)){await lsProfPut(p);np++;}}
+  for(const c of clips){
+    if(!c.id||have.has(c.id)||!z[c.file])continue;
+    await lsPut({id:c.id,created:c.created||Date.now(),lang:c.language,text:c.text,speaker:c.speaker||'',accent:c.accent||'',profile:c.profile||'',consent:!!c.consent,mime:'audio/wav',blob:new Blob([z[c.file]],{type:'audio/wav'}),dur:c.seconds||0,heard:c.heard_by_machine||'',score:c.match_percent==null?null:c.match_percent,verdict:c.verdict||''});nc++;
+  }
+  await lsLoadProfiles();
+  return {clips:nc,profiles:np};
+}
+/* ---- use recorded clips inside the animation: a line that matches a Correct clip of the character's accent profile is played from the recording ---- */
+let LS_REC=null;
+async function lsPrepareRec(){
+  LS_REC=null;
+  const used=new Set(Object.values(cfg).map(f=>f&&f.accent).filter(Boolean));if(!used.size)return;
+  try{await lsLoadProfiles();const map={};(await lsAll()).forEach(c=>{if(c.blob&&c.verdict==='ok'&&used.has(c.profile)){(map[c.profile]=map[c.profile]||{})[lsKey(c.text)]=c;}});LS_REC=map;}catch(e){LS_REC=null;}
+}
+function lsRecFor(x){const f=cfg[x.who],m=f&&f.accent&&LS_REC&&LS_REC[f.accent];return m?m[lsKey(x.text)]||null:null;}
+async function lsRecLoad(s,clip){
+  const buf=await lsDecode(clip.blob);let vis=null;try{vis=analyzeVisemes(buf);}catch(e){}
+  s.buf=buf;s.vis=vis;
 }
 /* ---- recording ---- */
 async function lsStartRec(onLevel){
@@ -4282,23 +4337,72 @@ async function lsStartRec(onLevel){
 /* ---- screen ---- */
 const lsEl=(t,p,kids)=>{const e=document.createElement(t);if(p){const {list,...rest}=p;Object.assign(e,rest);if(list)e.setAttribute('list',list);}(kids||[]).forEach(k=>e.appendChild(typeof k==='string'?document.createTextNode(k):k));return e;};
 function lsMsg(t,bad){const m=$('lsMsg');if(m){m.textContent=t||'';m.style.color=bad?'#ff8787':'#8ce99a';}}
+const LS_GOAL=180*60; // about 3 hours of Correct audio before a voice can realistically be trained
+function lsStats(pid,clips){const mine=clips.filter(c=>c.profile===pid),ok=mine.filter(c=>c.verdict==='ok');return {n:mine.length,ok:ok.length,fix:mine.filter(c=>c.verdict==='fix').length,sec:ok.reduce((a,c)=>a+(c.dur||0),0)};}
+const lsFmt=sec=>sec>=3600?(sec/3600).toFixed(1)+' h':sec>=60?Math.round(sec/60)+' min':Math.round(sec)+' s';
+function lsProfForm(p){ // create or edit
+  const name=prompt('Profile name (for example: Busoga elder, Masaka woman):',p?p.name:'');if(!name||!name.trim())return null;
+  const lc=(prompt('Language code: '+LS_LANGS.map(l=>l[0]+'='+l[1]).join(', '),p?p.lang:'lug')||'').trim().toLowerCase();if(!/^[a-z]{3}$/.test(lc))return null;
+  const spk=prompt('Speaker name (optional):',p?p.speaker:'')||'',reg=prompt('Accent / region (optional, e.g. Busoga, Buganda, Kigezi):',p?p.region:'')||'',notes=prompt('Notes (optional, e.g. age, how they speak):',p?p.notes:'')||'';
+  const con=confirm('Did the speaker agree to be recorded and to the clips being kept in this collection?\nOK = yes, Cancel = not yet');
+  return {id:p?p.id:'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),created:p?p.created:Date.now(),name:name.trim(),lang:lc,speaker:spk.trim(),region:reg.trim(),notes:notes.trim(),consent:con};
+}
+let lsActiveProf='';
 async function lsRender(keep){
   const box=$('lsBody');if(!box)return;
   const keepForm=keep?{lang:$('lsLang')&&$('lsLang').value,text:$('lsText')&&$('lsText').value,spk:$('lsSpk')&&$('lsSpk').value,acc:$('lsAcc')&&$('lsAcc').value,con:$('lsCon')&&$('lsCon').checked}:null;
   try{lsCache=await lsAll();}catch(e){lsCache=[];}
+  await lsLoadProfiles();
+  if(lsActiveProf&&!lsProf(lsActiveProf))lsActiveProf='';
   box.innerHTML='';
-  const head=lsEl('div',{style:'display:flex;gap:8px;align-items:center'},[lsEl('b',{style:'font-size:18px;flex:1',textContent:'🎙️ Language Studio'}),lsEl('button',{id:'lsClose',textContent:'✕ Close',style:'flex:0 0 auto;background:#adb5bd'})]);
-  box.appendChild(head);
-  box.appendChild(lsEl('div',{className:'hint',textContent:'Record a speaker (or upload a clip), type the word or line they meant to say, then press Check. The machine tells you what it heard, and which words did not match. The machine is only a helper: the speaker decides if it is Correct. Everything is saved on this device. Always ask the speaker first.'}));
+  box.appendChild(lsEl('div',{style:'display:flex;gap:8px;align-items:center'},[lsEl('b',{style:'font-size:18px;flex:1',textContent:'🎙️ Language Studio'}),lsEl('button',{id:'lsClose',textContent:'✕ Close',style:'flex:0 0 auto;background:#adb5bd'})]));
+  box.appendChild(lsEl('div',{className:'hint',textContent:'1) Make an accent profile for each speaker. 2) Record the lines in it and mark each Correct or Needs correction. 3) On a character card, choose that profile: lines you recorded and marked Correct are played in that real accent. Everything stays on this device. Always ask the speaker first.'}));
+  // --- accent profiles
+  box.appendChild(lsEl('div',{className:'vl-h',textContent:'Accent profiles ('+LS_PROFILES.length+')'}));
+  const bNew=lsEl('button',{id:'lsNewProf',textContent:'＋ New accent profile',style:'background:#ffd43b'});
+  bNew.onclick=async()=>{const p=lsProfForm(null);if(!p)return;await lsProfPut(p);lsActiveProf=p.id;lsRender(true);};
+  const fImp=lsEl('input',{type:'file',accept:'.zip,application/zip',style:'display:none',id:'lsImpFile'});
+  const bImp=lsEl('button',{id:'lsImp',textContent:'⬆ Import (.zip)',style:'background:#b197fc'});bImp.onclick=()=>fImp.click();
+  fImp.onchange=async()=>{const f=fImp.files[0];fImp.value='';if(!f)return;lsMsg('Importing…');try{const r=await lsImport(f);await lsRender(true);lsMsg('Imported '+r.clips+' clip(s) and '+r.profiles+' profile(s) ✓');}catch(e){lsMsg(String(e.message||e),true);}};
+  box.appendChild(lsEl('div',{className:'ls-row'},[bNew,bImp,fImp]));
+  if(!LS_PROFILES.length)box.appendChild(lsEl('div',{className:'hint',textContent:'No profiles yet. A profile is one language + region + speaker, for example “Lusoga · Busoga · Mama Aisha”.'}));
+  LS_PROFILES.forEach(p=>{
+    const st=lsStats(p.id,lsCache),pc=Math.min(100,st.sec/LS_GOAL*100),on=lsActiveProf===p.id;
+    const c=lsEl('div',{className:'ls-clip'+(on?' ls-on':'')});
+    c.appendChild(lsEl('div',{className:'ls-ct'},[lsEl('b',{textContent:p.name}),lsEl('span',{className:'ls-badge',textContent:lsName(p.lang),style:'background:#74c0fc'})]));
+    c.appendChild(lsEl('div',{className:'hint',textContent:[p.speaker,p.region,p.notes,p.consent?'consent ✓':'no consent noted yet'].filter(Boolean).join(' · ')}));
+    c.appendChild(lsEl('div',{className:'hint',textContent:st.n+' clips · '+st.ok+' Correct ('+lsFmt(st.sec)+')'+(st.fix?' · '+st.fix+' need correction':'')}));
+    c.appendChild(lsEl('div',{className:'ls-meter'},[lsEl('i',{style:'width:'+pc+'%;background:#ffd43b'})]));
+    c.appendChild(lsEl('div',{className:'hint',textContent:'Progress toward a trainable voice: about 3 hours of Correct audio. Fewer clips still work for animation: matching lines are played from the recording.'}));
+    const bar=lsEl('div',{className:'ls-row'});
+    const bU=lsEl('button',{textContent:on?'● Recording into this profile':'🎙 Record into this',style:'background:'+(on?'#69db7c':'#a5d8ff')});bU.onclick=()=>{lsActiveProf=on?'':p.id;lsRender(true);};
+    const bX=lsEl('button',{textContent:'⬇ Export',style:'background:#b197fc'});bX.onclick=async()=>{lsMsg('Preparing the file…');try{const n=await lsExport(true,p.id);lsMsg('Exported '+n+' Correct clip(s) ✓');}catch(e){lsMsg(String(e.message||e),true);}};
+    const bE=lsEl('button',{textContent:'✎ Edit',style:'background:#a5d8ff'});bE.onclick=async()=>{const q=lsProfForm(p);if(!q)return;await lsProfPut(q);lsRender(true);};
+    const bD=lsEl('button',{textContent:'🗑',title:'Delete the profile (clips are kept)',style:'background:#868e96'});bD.onclick=async()=>{if(!confirm('Delete the profile “'+p.name+'”? Its clips are kept but lose the profile.'))return;for(const k of lsCache.filter(k=>k.profile===p.id)){k.profile='';await lsPut(k);}await lsProfDel(p.id);if(lsActiveProf===p.id)lsActiveProf='';lsRender(true);};
+    bar.append(bU,bX,bE,bD);c.appendChild(bar);box.appendChild(c);
+  });
   // --- new clip card
+  box.appendChild(lsEl('div',{className:'vl-h',textContent:'Record a line'}));
+  const ap=lsProf(lsActiveProf);
   const card=lsEl('div',{className:'ls-card'});
   const lang=lsEl('select',{id:'lsLang'});LS_LANGS.forEach(([c,n])=>lang.appendChild(lsEl('option',{value:c,textContent:n})));lang.appendChild(lsEl('option',{value:'_o',textContent:'Other language…'}));
-  lang.onchange=()=>{if(lang.value==='_o'){const c=(prompt('Type the 3-letter language code (for example: cgg, ttj, myx)')||'').trim().toLowerCase();if(/^[a-z]{3}$/.test(c)){if(![...lang.options].some(o=>o.value===c))lang.insertBefore(lsEl('option',{value:c,textContent:c.toUpperCase()}),lang.lastChild);lang.value=c;}else lang.value='lug';}lsSyncMachine();};
+  lang.onchange=()=>{if(lang.value==='_o'){const c=(prompt('Type the 3-letter language code (for example: cgg, ttj, myx)')||'').trim().toLowerCase();if(/^[a-z]{3}$/.test(c)){if(![...lang.options].some(o=>o.value===c))lang.insertBefore(lsEl('option',{value:c,textContent:c.toUpperCase()}),lang.lastChild);lang.value=c;}else lang.value='lug';}};
+  const psel=lsEl('select',{id:'lsProfSel'});psel.appendChild(lsEl('option',{value:'',textContent:'No profile'}));LS_PROFILES.forEach(p=>psel.appendChild(lsEl('option',{value:p.id,textContent:p.name+' · '+lsName(p.lang)})));psel.value=lsActiveProf;
+  psel.onchange=()=>{lsActiveProf=psel.value;lsRender(true);};
   const text=lsEl('textarea',{id:'lsText',rows:2,placeholder:'The word or line the speaker is trying to say, written in the language',style:'width:100%'});
   const spk=lsEl('input',{id:'lsSpk',placeholder:'Speaker name',list:'lsSpkList'});const sl=lsEl('datalist',{id:'lsSpkList'});[...new Set(lsCache.map(c=>c.speaker).filter(Boolean))].forEach(s=>sl.appendChild(lsEl('option',{value:s})));
   const acc=lsEl('input',{id:'lsAcc',placeholder:'Accent / region (e.g. Busoga, Masaka)'});
   const con=lsEl('label',{className:'ls-con'},[lsEl('input',{type:'checkbox',id:'lsCon'}),' The speaker agreed to be recorded and kept in my collection']);
-  card.append(lsEl('div',{className:'ls-row'},[lang]),text,lsEl('div',{className:'ls-row'},[spk,acc,sl]),con);
+  card.append(lsEl('div',{className:'ls-row'},[psel,lang]),text,lsEl('div',{className:'ls-row'},[spk,acc,sl]),con);
+  // lines of the current episode: tap one to record exactly that line
+  const eps=(typeof segs!=='undefined'?segs:[]).filter(s=>s.type==='line'&&!s.sing&&s.text);
+  if(eps.length){
+    const seen=new Set(),have=new Set(lsCache.filter(c=>c.verdict==='ok'&&(!lsActiveProf||c.profile===lsActiveProf)).map(c=>lsKey(c.text)));
+    const det=lsEl('details',{className:'ls-eps'},[lsEl('summary',{textContent:'📜 Lines from my current episode (tap one to record it)'})]);
+    eps.forEach(s=>{const k=lsKey(s.text);if(seen.has(k)||seen.size>=40)return;seen.add(k);
+      const b=lsEl('button',{className:'ls-ep',textContent:(have.has(k)?'✓ ':'')+s.who+': '+s.text});b.onclick=()=>{$('lsText').value=s.text;lsMsg('Now record this line.');$('lsText').scrollIntoView({block:'center'});};det.appendChild(b);});
+    card.appendChild(det);
+  }
   const meter=lsEl('div',{className:'ls-meter'},[lsEl('i',{id:'lsLvl'})]);
   const wave=lsEl('canvas',{id:'lsWave',width:600,height:80,style:'width:100%;height:80px;border-radius:8px'});
   const bRec=lsEl('button',{id:'lsRec',textContent:'⏺ Record',style:'background:#ff6b6b'});
@@ -4310,6 +4414,7 @@ async function lsRender(keep){
   card.append(lsEl('div',{className:'ls-row'},[bRec,bUp,fin]),meter,wave,lsEl('div',{className:'ls-row'},[bPlay,bChk,bSave]),lsEl('div',{id:'lsRes'}),lsEl('div',{id:'lsMsg',className:'hint'}));
   box.appendChild(card);
   if(keepForm){if(keepForm.lang&&[...lang.options].some(o=>o.value===keepForm.lang))lang.value=keepForm.lang;text.value=keepForm.text||'';spk.value=keepForm.spk||'';acc.value=keepForm.acc||'';con.querySelector('input').checked=!!keepForm.con;}
+  if(ap){lang.value=[...lang.options].some(o=>o.value===ap.lang)?ap.lang:(lang.insertBefore(lsEl('option',{value:ap.lang,textContent:ap.lang.toUpperCase()}),lang.lastChild),ap.lang);spk.value=ap.speaker||spk.value;acc.value=ap.region||acc.value;con.querySelector('input').checked=!!ap.consent;}
   lsDrawWave(wave,LSD&&LSD.peaks);lsShowRes();lsDraftBtns();
   const setClip=async(blob,ms)=>{
     lsMsg('');LSD={blob,mime:blob.type,dur:Math.round(ms)/1000,heard:'',score:null,verdict:'',peaks:null};
@@ -4332,26 +4437,25 @@ async function lsRender(keep){
   };
   bSave.onclick=async()=>{
     if(!LSD)return;const t=$('lsText').value.trim();if(!t){lsMsg('Type the word or line first.',true);return;}
-    const c={id:'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),created:Date.now(),lang:$('lsLang').value,text:t,speaker:$('lsSpk').value.trim(),accent:$('lsAcc').value.trim(),consent:$('lsCon').checked,mime:LSD.mime,blob:LSD.blob,dur:LSD.dur,heard:LSD.heard,score:LSD.score,verdict:LSD.verdict};
+    const c={id:'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),created:Date.now(),lang:$('lsLang').value,text:t,speaker:$('lsSpk').value.trim(),accent:$('lsAcc').value.trim(),profile:lsActiveProf||'',consent:$('lsCon').checked,mime:LSD.mime,blob:LSD.blob,dur:LSD.dur,heard:LSD.heard,score:LSD.score,verdict:LSD.verdict};
     try{await lsPut(c);try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist();}catch(e){}LSD=null;$('lsText').value='';lsRender(true);setTimeout(()=>lsMsg('Saved ✓'),60);}catch(e){lsMsg('Could not save on this device: '+(e.message||e),true);}
   };
   // --- library
   const tot=lsCache.reduce((a,c)=>a+(c.blob?c.blob.size:0),0);
   box.appendChild(lsEl('div',{className:'vl-h',textContent:'My clips ('+lsCache.length+(lsCache.length?' · '+(tot/1048576).toFixed(1)+' MB':'')+')'}));
+  const fp=lsEl('select',{id:'lsFp'});fp.appendChild(lsEl('option',{value:'',textContent:'All profiles'}));fp.appendChild(lsEl('option',{value:'none',textContent:'No profile'}));LS_PROFILES.forEach(p=>fp.appendChild(lsEl('option',{value:p.id,textContent:p.name})));fp.value=lsFilter.profile||'';fp.onchange=()=>{lsFilter.profile=fp.value;lsRender(true);};
   const fl=lsEl('select',{id:'lsFl'});fl.appendChild(lsEl('option',{value:'',textContent:'All languages'}));[...new Set(lsCache.map(c=>c.lang))].forEach(c=>fl.appendChild(lsEl('option',{value:c,textContent:lsName(c)})));fl.value=lsFilter.lang;fl.onchange=()=>{lsFilter.lang=fl.value;lsRender(true);};
   const fv=lsEl('select',{id:'lsFv'});[['','All'],['ok','Correct'],['fix','Needs correction'],['unsure','Not sure'],['none','Not judged']].forEach(([v,n])=>fv.appendChild(lsEl('option',{value:v,textContent:n})));fv.value=lsFilter.verdict;fv.onchange=()=>{lsFilter.verdict=fv.value;lsRender(true);};
   const onlyOk=lsEl('input',{type:'checkbox',id:'lsOnlyOk',checked:true});
-  const bExp=lsEl('button',{id:'lsExp',textContent:'⬇ Export dataset (.zip)',style:'background:#b197fc'});
-  bExp.onclick=async()=>{bExp.disabled=true;lsMsg('Preparing the file…');try{const n=await lsExport($('lsOnlyOk').checked);lsMsg('Exported '+n+' clip'+(n===1?'':'s')+' ✓');}catch(e){lsMsg(String(e.message||e),true);}bExp.disabled=false;};
-  box.appendChild(lsEl('div',{className:'ls-row'},[fl,fv]));
+  const bExp=lsEl('button',{id:'lsExp',textContent:'⬇ Export all (.zip)',style:'background:#b197fc'});
+  bExp.onclick=async()=>{bExp.disabled=true;lsMsg('Preparing the file…');try{const n=await lsExport($('lsOnlyOk').checked,'');lsMsg('Exported '+n+' clip'+(n===1?'':'s')+' ✓');}catch(e){lsMsg(String(e.message||e),true);}bExp.disabled=false;};
+  box.appendChild(lsEl('div',{className:'ls-row'},[fp,fl,fv]));
   box.appendChild(lsEl('div',{className:'ls-row'},[lsEl('label',{className:'ls-con'},[onlyOk,' only clips marked Correct']),bExp]));
-  const list=lsCache.filter(c=>(!lsFilter.lang||c.lang===lsFilter.lang)&&(!lsFilter.verdict||(lsFilter.verdict==='none'?!c.verdict:c.verdict===lsFilter.verdict)));
+  const list=lsCache.filter(c=>(!lsFilter.lang||c.lang===lsFilter.lang)&&(!lsFilter.verdict||(lsFilter.verdict==='none'?!c.verdict:c.verdict===lsFilter.verdict))&&(!lsFilter.profile||(lsFilter.profile==='none'?!c.profile:c.profile===lsFilter.profile)));
   if(!list.length)box.appendChild(lsEl('div',{className:'hint',textContent:lsCache.length?'No clips match this filter.':'No clips yet. Record or upload your first one above.'}));
   list.forEach(c=>box.appendChild(lsClipRow(c)));
-  $('lsClose').onclick=()=>{lsStop();if(lsRec){try{lsRec.stop();}catch(e){}lsRec=null;}$('langStudio').hidden=true;};
-  lsSyncMachine();
+  $('lsClose').onclick=()=>{lsStop();if(lsRec){try{lsRec.stop();}catch(e){}lsRec=null;}$('langStudio').hidden=true;if(typeof renderCards==='function'){try{renderCards(true);}catch(e){}}};
 }
-function lsSyncMachine(){}
 function lsDraftBtns(){const has=!!LSD;['lsPlay','lsChk','lsSave'].forEach(i=>{const b=$(i);if(b)b.disabled=!has;});}
 function lsShowRes(){
   const r=$('lsRes');if(!r)return;r.innerHTML='';if(!LSD||LSD.heard==null||(LSD.score==null&&!LSD.heard))return;
@@ -4387,6 +4491,7 @@ function lsClipRow(c){
   row.appendChild(bar);return row;
 }
 
+try{lsLoadProfiles().then(()=>{try{renderCards(true);}catch(e){}});}catch(e){}
 $('btnStudio').onclick=()=>{$('langStudio').hidden=false;lsRender();};
 $('btnLab').onclick=()=>{vlRender();$('voiceLab').hidden=false;};
 $('vlClose').onclick=()=>{if(vlAudio){try{vlAudio.stop();}catch(e){}}$('voiceLab').hidden=true;};
