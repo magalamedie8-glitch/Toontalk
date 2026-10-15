@@ -342,6 +342,7 @@ function ensureCfg(name,i){
   if(!cfg[name])cfg[name]={skin:SKINS[i%SKINS.length],outfit:OUTFITS[i%OUTFITS.length],look:DLOOKS[i%DLOOKS.length],voice:'',pitch:DPITCH[i%DPITCH.length],style:'cartoon',thick:10};
 }
 
+
 /* ---------- voices ---------- */
 function rank(v){const l=v.lang.toLowerCase();return l.startsWith('en')?0:l.startsWith('sw')?1:2;}
 function loadVoices(){
@@ -414,6 +415,50 @@ function resampleBuf(buf,k){ // k>1 = higher and quicker, k<1 = lower and slower
   }
   return out;
 }
+
+/* ---------- VOICE EFFECTS (kids, devils, monsters, robots...) ---------- */
+const FX={
+  '':{l:'None'},
+  child:{l:'👧 Child (higher)',k:1.28},
+  baby:{l:'👶 Baby (very high)',k:1.55},
+  chipmunk:{l:'🐿 Chipmunk',k:1.8},
+  deep:{l:'🧔 Deep man',k:0.82,low:6},
+  devil:{l:'😈 Devil',k:0.74,dist:40,rev:1.6,dbl:0.8,low:5},
+  monster:{l:'👹 Monster',k:0.62,dist:25,lp:2200,rev:0.8},
+  robot:{l:'🤖 Robot',ring:55},
+  alien:{l:'👽 Alien',k:1.15,ring:28,rev:0.5},
+  ghost:{l:'👻 Ghost',k:0.9,rev:2.6,echo:0.28,trem:5},
+  radio:{l:'📻 Radio / phone',bp:[400,3200],dist:8},
+  cave:{l:'🏔 Cave echo',rev:2.2,echo:0.35}
+};
+function fxCurve(a){const n=1024,c=new Float32Array(n);for(let i=0;i<n;i++){const x=i*2/n-1;c[i]=(3+a)*x*20*(Math.PI/180)/(Math.PI+a*Math.abs(x));}return c;}
+function fxImpulse(oc,secs,decay){const n=Math.floor(oc.sampleRate*secs),b=oc.createBuffer(2,n,oc.sampleRate);for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,decay);}return b;}
+async function fxApply(buf,key){
+  const p=FX[key];if(!key||!p)return buf;
+  try{
+    if(p.k)buf=resampleBuf(buf,p.k);
+    const sr=buf.sampleRate,tail=p.rev?Math.min(2,p.rev*0.5):(p.echo?0.6:0);
+    const oc=new OfflineAudioContext(buf.numberOfChannels,Math.ceil((buf.duration+tail)*sr),sr);
+    const src=oc.createBufferSource();src.buffer=buf;
+    let node=src;const chain=n=>{node.connect(n);node=n;return n;};
+    if(p.low){const f=oc.createBiquadFilter();f.type='lowshelf';f.frequency.value=250;f.gain.value=p.low;chain(f);}
+    if(p.bp){const h=oc.createBiquadFilter();h.type='highpass';h.frequency.value=p.bp[0];chain(h);const l=oc.createBiquadFilter();l.type='lowpass';l.frequency.value=p.bp[1];chain(l);}
+    if(p.lp){const l=oc.createBiquadFilter();l.type='lowpass';l.frequency.value=p.lp;chain(l);}
+    if(p.dist){const w=oc.createWaveShaper();w.curve=fxCurve(p.dist);w.oversample='2x';chain(w);}
+    if(p.ring){const g=oc.createGain();g.gain.value=0;const o=oc.createOscillator();o.frequency.value=p.ring;o.connect(g.gain);o.start();chain(g);}
+    if(p.trem){const g=oc.createGain();g.gain.value=0.7;const o=oc.createOscillator();o.frequency.value=p.trem;const og=oc.createGain();og.gain.value=0.3;o.connect(og);og.connect(g.gain);o.start();chain(g);}
+    const out=oc.createGain();node.connect(out);
+    if(p.dbl){const d=oc.createDelay(1);d.delayTime.value=0.03;const g=oc.createGain();g.gain.value=p.dbl*0.5;node.connect(d);d.connect(g);g.connect(out);}
+    if(p.echo){const d=oc.createDelay(1);d.delayTime.value=0.22;const fb=oc.createGain();fb.gain.value=0.4;const wg=oc.createGain();wg.gain.value=p.echo;node.connect(d);d.connect(fb);fb.connect(d);d.connect(wg);wg.connect(out);}
+    if(p.rev){const cv=oc.createConvolver();cv.buffer=fxImpulse(oc,p.rev,2.5);const wg=oc.createGain();wg.gain.value=0.45;node.connect(cv);cv.connect(wg);wg.connect(out);}
+    out.connect(oc.destination);src.start();
+    const r=await oc.startRendering();
+    let pk=0;for(let c=0;c<r.numberOfChannels;c++){const d=r.getChannelData(c);for(let i=0;i<d.length;i++){const v=Math.abs(d[i]);if(v>pk)pk=v;}}
+    if(pk>0.001){const g=Math.min(3,0.9/pk);for(let c=0;c<r.numberOfChannels;c++){const d=r.getChannelData(c);for(let i=0;i<d.length;i++)d[i]*=g;}}
+    return r;
+  }catch(e){return buf;}
+}
+
 /* ---------- server voices (natural voices from server.js) ---------- */
 let API=location.protocol==='file:'?'http://localhost:3000':'';
 try{const sv=localStorage.getItem('toontalk-server');if(sv)API=sv.replace(/\/+$/,'');}catch(e){}
@@ -441,7 +486,7 @@ const VOICE_CACHE=new Map(); // lines already made this session play again insta
 async function fetchLine(s,sv){
   const f=cfg[s.who],e=EMO[s.emo];
   const rate=clamp(rateNow()*e.rate,0.5,2),pitch=clamp(f.pitch*e.pitch,0.5,2),fac=(sv.prov==='sunbird'&&f.vtype)?voiceFactor(f,sv):1;
-  const ck=[sv.id,s.text,rate.toFixed(2),pitch.toFixed(2),fac.toFixed(2)].join('|');
+    const ck=[sv.id,s.text,rate.toFixed(2),pitch.toFixed(2),fac.toFixed(2),f.fx||''].join('|');
   const hit=VOICE_CACHE.get(ck);
   if(hit){s.buf=hit.buf;s.vis=hit.vis;return;}
   let last=null;
@@ -452,6 +497,7 @@ async function fetchLine(s,sv){
       if(!r.ok){let d='';try{const j=await r.json();d=j.detail||j.error||'';}catch(x){}const er=new Error('tts '+r.status+(d?' - '+d:''));er.status=r.status;throw er;}
       let buf=await actx.decodeAudioData(await r.arrayBuffer());
       if(fac!==1)buf=resampleBuf(buf,fac);
+      if(f.fx)buf=await fxApply(buf,f.fx);
       let vis=null;try{vis=analyzeVisemes(buf);}catch(x){}
       s.buf=buf;s.vis=vis;
       if(VOICE_CACHE.size>300)VOICE_CACHE.delete(VOICE_CACHE.keys().next().value);
@@ -770,6 +816,7 @@ function renderCards(force){
     voices.forEach(v=>vopts.push([v.voiceURI,v.name+' ('+v.lang+')']));
     card.appendChild(row('Voice',mkSel(vopts,f.voice,v=>f.voice=v)));
     card.appendChild(row('Pitch',mkIn('range',f.pitch,v=>f.pitch=+v,{min:0.5,max:2,step:0.05})));
+    card.appendChild(row('Voice effect',mkSel(Object.keys(FX).map(k=>[k,FX[k].l]),f.fx||'',v=>f.fx=v)));
     card.appendChild(row('Line',mkIn('range',f.thick||10,v=>f.thick=+v,{min:5,max:20,step:1})));
     box.appendChild(card);
   });
