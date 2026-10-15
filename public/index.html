@@ -51,6 +51,21 @@
   .fig{flex:1;padding:8px 4px;font-size:12px;background:#2a2a3a;color:#ddd;border:2px solid transparent}
   .fig span{display:block;font-size:20px}
   .fig.on{border-color:#ffd43b;color:#fff}
+  #movPage[hidden]{display:none}
+  #movPage{position:fixed;inset:0;background:#12121a;z-index:41;overflow:auto;padding:16px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+  .mv-top{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.mv-top input{flex:1 1 220px}
+  .mv-opts{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0}.mv-opts label{display:flex;gap:6px;align-items:center;font-size:13px}.mv-opts input{width:auto}
+  .mv-time{margin:6px 0;font-size:13px}.mv-track{height:8px;background:#2b2b3d;border-radius:6px;margin-top:4px;overflow:hidden}#movBar{height:100%;background:#ffd43b;width:0}
+  .mv-act{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.mv-act button{flex:1 1 160px}
+  .mv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:8px}
+  .mv-card{background:#1e1e2c;border:3px solid #000;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px;box-shadow:4px 4px 0 #000}
+  .mv-head{display:flex;gap:6px;align-items:center}.mv-head input{flex:1;min-width:0;font-weight:bold}
+  .mv-n{background:#ffd43b;color:#000;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-weight:bold;flex:0 0 26px}
+  .mv-t{font-size:12px;opacity:.7;white-space:nowrap}.mv-row{display:flex;gap:6px;align-items:center}.mv-row select{flex:1}
+  .mv-l{font-size:12px;opacity:.75}.mv-card textarea{width:100%;resize:vertical;min-height:0;height:58px}.mv-card textarea:last-of-type{height:130px}
+  .mv-chips{display:flex;flex-wrap:wrap;gap:5px}.mv-chip{padding:4px 9px;border-radius:14px;background:#343450;color:#fff;font-size:13px;flex:0 0 auto}.mv-chip.on{background:#ffd43b;color:#000;font-weight:bold}.mv-add{width:130px;flex:0 0 auto}
+  .mv-bar{display:flex;gap:5px;flex-wrap:wrap}.mv-bar button{flex:1 1 38px;padding:7px 4px}
+  .mv-plus{min-height:120px;background:transparent;border:3px dashed #555;color:#ccc;font-size:18px;border-radius:6px}
   #projPage{position:fixed;inset:0;background:#12121a;z-index:40;overflow:auto;padding:16px}
   .phead{display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:640px;margin:0 auto 8px}
   .phead h2{margin:0;flex:1;color:#ffd43b;font-size:20px}
@@ -166,6 +181,7 @@
     <button id="btnNew" style="background:#a5d8ff">＋ New episode</button>
     <button id="btnSave" style="background:#b2f2bb">💾 Save</button>
     <button id="btnProj" style="background:#ffec99">📁 My projects</button>
+    <button id="btnMovie" style="background:#ffa8a8">🎞 Movie board</button>
   </div>
   <div class="hint" id="savedAt"></div>
   <div class="row" id="actions">
@@ -256,6 +272,19 @@ Mama (love): Okay okay, I will make you both chapati.</textarea>
   <div class="hint" style="text-align:center">Saved on this device. They stay here even when you are offline.</div>
   <div id="projList"></div>
 </div>
+<div id="movPage" hidden>
+  <div class="phead"><h2>🎞 Movie board</h2><button id="movClose">✕ Close</button></div>
+  <div class="mv-top">
+    <input type="text" id="movTitle" placeholder="Movie title" maxlength="60">
+    <input type="text" id="movOutro" placeholder="Closing card" maxlength="80">
+  </div>
+  <div class="hint">Each box is one scene, like a comic strip. Name it, choose the place and who is in it, write what happens, then add the lines. Scenes play in order (use ◀ ▷ to move them) and are joined into <b>one movie</b>.</div>
+  <div class="mv-opts"><label><input type="checkbox" id="movCards"> Title card before each scene</label><label><input type="checkbox" id="movWalk"> Characters walk in and out of each scene</label></div>
+  <div class="mv-time"><span id="movTotal"></span><div class="mv-track"><div id="movBar"></div></div></div>
+  <div class="mv-act"><button id="movPlay" style="background:#69db7c">▶ Play whole movie</button><button id="movRec" style="background:#ff922b">🎬 Create movie video</button><button id="movAddCur" style="background:#a5d8ff">⬇ Add my Write script as a scene</button></div>
+  <div class="hint" id="movMsg"></div>
+  <div id="movBody"></div>
+</div>
 <div id="voiceLab" hidden><div class="vl-w">
   <div style="display:flex;gap:8px;align-items:center"><b style="font-size:18px;flex:1">🎧 Voice lab</b><button id="vlClose" style="flex:0 0 auto;background:#adb5bd">✕ Close</button></div>
   <div class="hint">Press ▶ to listen. Use ☆ Save to keep the voices you like for a girl, boy, grandfather, animal... (they appear on every character card). You can also say whether it is a woman or a man, and how old it sounds. ToonTalk remembers this and uses it when you pick a voice type such as Baby, Teenager or Grandmother on a character. Voices you leave on "?" are used for any type.</div>
@@ -306,6 +335,7 @@ Mama (love): Okay okay, I will make you both chapati.</textarea>
 <script src="vendor/mp4-muxer.js"></script>
 <script>
 const $=id=>document.getElementById(id);
+let MOVIE_OVR=null,MOVIE_FILE='';
 const canvas=$('c');let ctx=canvas.getContext('2d');
 const W=540,H=960,BASE_Y=700,HOLD=0.9;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -325,8 +355,10 @@ let playing=false,idx=0,curBg='day',lastCount=0,curPic=null;
 let actx=null,dest=null,recorder=null,chunks=[],recording=false,dispStream=null;
 
 /* ---------- save / load ---------- */
+let TT_FRESH=false;try{TT_FRESH=!localStorage.getItem('toontalk2');}catch(e){}
 function save(){
   try{localStorage.setItem('toontalk2',JSON.stringify({title:$('title').value,script:$('script').value,outro:$('outro').value,bg:$('bg').value,disp:$('disp').value,speed:$('speed').value,mode:$('mode').value,cfg}));}catch(e){}
+  try{mirrorSave();}catch(e){}
   projDirty();
 }
 function load(){
@@ -341,7 +373,6 @@ function load(){
 function ensureCfg(name,i){
   if(!cfg[name])cfg[name]={skin:SKINS[i%SKINS.length],outfit:OUTFITS[i%OUTFITS.length],look:DLOOKS[i%DLOOKS.length],voice:'',pitch:DPITCH[i%DPITCH.length],style:'cartoon',thick:10};
 }
-
 
 /* ---------- voices ---------- */
 function rank(v){const l=v.lang.toLowerCase();return l.startsWith('en')?0:l.startsWith('sw')?1:2;}
@@ -374,7 +405,7 @@ const AGEF={baby:1.55,child:1.32,teen:1.13,adult:1,elder:0.86}; // how high the 
 const AGES=[['child','Child'],['teen','Teenager'],['adult','Adult'],['elder','Elder']];
 let voiceTags={};
 try{voiceTags=JSON.parse(localStorage.getItem('toontalk-voicetags')||'{}')||{};}catch(e){}
-function saveTags(){try{localStorage.setItem('toontalk-voicetags',JSON.stringify(voiceTags));}catch(e){}}
+function saveTags(){try{localStorage.setItem('toontalk-voicetags',JSON.stringify(voiceTags));}catch(e){}try{mirrorSave();}catch(e){}}
 function tagOf(v){ // {g:'F'|'M'|'', a:'child'|'teen'|'adult'|'elder'}
   const t=voiceTags[v.id]||{};
   const g=t.g!==undefined?t.g:(v.gender==='Female'?'F':v.gender==='Male'?'M':'');
@@ -415,7 +446,6 @@ function resampleBuf(buf,k){ // k>1 = higher and quicker, k<1 = lower and slower
   }
   return out;
 }
-
 /* ---------- VOICE EFFECTS (kids, devils, monsters, robots...) ---------- */
 const FX={
   '':{l:'None'},
@@ -486,7 +516,7 @@ const VOICE_CACHE=new Map(); // lines already made this session play again insta
 async function fetchLine(s,sv){
   const f=cfg[s.who],e=EMO[s.emo];
   const rate=clamp(rateNow()*e.rate,0.5,2),pitch=clamp(f.pitch*e.pitch,0.5,2),fac=(sv.prov==='sunbird'&&f.vtype)?voiceFactor(f,sv):1;
-    const ck=[sv.id,s.text,rate.toFixed(2),pitch.toFixed(2),fac.toFixed(2),f.fx||''].join('|');
+  const ck=[sv.id,s.text,rate.toFixed(2),pitch.toFixed(2),fac.toFixed(2),f.fx||''].join('|');
   const hit=VOICE_CACHE.get(ck);
   if(hit){s.buf=hit.buf;s.vis=hit.vis;return;}
   let last=null;
@@ -602,8 +632,8 @@ function drawPic(key,tt){ // the story picture window
 }
 function charByName(nm){return nm?order.find(o=>o.toLowerCase()===nm.toLowerCase())||null:null;}
 function build(){
-  const cps=+$('speed').value,title=$('title').value.trim();
-  const raw=$('script').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const cps=+$('speed').value,title=(MOVIE_OVR?MOVIE_OVR.title:$('title').value).trim();
+  const raw=(MOVIE_OVR?MOVIE_OVR.script:$('script').value).split('\n').map(s=>s.trim()).filter(Boolean);
   chars={};order=[];segs=[];let skipped=0,pendReacts=[];let SONG={style:'pop',bpm:null,tune:null,beat:true},TSTYLE='fade';
   MODE={mode:($('mode')&&$('mode').value)||'normal',leadNames:[],teamL:[],teamR:[],lead:[],side:{}};
   if(title)segs.push({type:'title',text:title,dur:2});
@@ -721,7 +751,7 @@ function build(){
   finalizeMode();
   const seen=new Set();
   segs.forEach(g=>{if(!g.who)return;if(g.type==='act'&&g.kind==='enter'&&!seen.has(g.who)&&chars[g.who])chars[g.who].startOff=true;seen.add(g.who);});
-  const outro=$('outro').value.trim();
+  const outro=(MOVIE_OVR?MOVIE_OVR.outro:$('outro').value).trim();
   if(outro)segs.push({type:'title',text:outro,dur:2.2});
   if(skipped)$('status').textContent='Up to '+MAXC+' characters are supported; skipped '+skipped+' line(s).';
   renderCards();
@@ -2626,10 +2656,10 @@ function fileNameFor(title,ext){
   const sl=(title||'episode').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40)||'episode';
   return 'toontalk-'+sl+'.'+ext;
 }
-const projFileName=ext=>fileNameFor($('title').value,ext);
+const projFileName=ext=>fileNameFor(MOVIE_FILE||$('title').value,ext);
 function snapshot(){
   return {id:proj.id,created:proj.created,updated:Date.now(),title:$('title').value,script:$('script').value,outro:$('outro').value,
-    bg:$('bg').value,disp:$('disp').value,speed:$('speed').value,mode:$('mode').value,cfg:JSON.parse(JSON.stringify(cfg)),actions:JSON.parse(JSON.stringify(CUSTOM)),videoId:proj.videoId,downloaded:proj.downloaded};
+    bg:$('bg').value,disp:$('disp').value,speed:$('speed').value,mode:$('mode').value,cfg:JSON.parse(JSON.stringify(cfg)),actions:JSON.parse(JSON.stringify(CUSTOM)),movie:JSON.parse(JSON.stringify(MOV)),videoId:proj.videoId,downloaded:proj.downloaded};
 }
 function projDirty(){
   if(opening)return;
@@ -2682,7 +2712,7 @@ async function newEpisode(){
   await saveProject();
   stopAll(true);
   const names=choice==='keep'&&order.length?order.slice():['Kato','Nakato'];
-  opening=true;
+  opening=true;MOVIE_OVR=null;MOVIE_FILE='';movSet(null);
   if(choice==='fresh'){cfg={};$('mode').value='normal';}
   proj={id:null,created:0,videoId:null,downloaded:false};projDirtyFlag=false;
   try{localStorage.removeItem('toontalk-pid');}catch(e){}
@@ -2699,6 +2729,7 @@ async function openProject(id){
   await saveProject();
   stopAll(true);
   opening=true;
+  MOVIE_OVR=null;MOVIE_FILE='';movSet(r.movie||null);
   $('title').value=r.title;$('script').value=r.script;$('outro').value=r.outro;
   $('bg').value=r.bg||'day';$('disp').value=r.disp||'bubble';$('speed').value=r.speed||22;$('mode').value=r.mode||'normal';
   cfg=JSON.parse(JSON.stringify(r.cfg||{}));
@@ -2761,7 +2792,71 @@ async function renderProjects(){
     c.appendChild(a);box.appendChild(c);
   });
 }
-function openProjects(){renderProjects();$('projPage').hidden=false;}
+
+/* ================= keep my data safe =================
+   1) every setting is also copied into a second store (IndexedDB), and brought back by itself if the browser empties the first one
+   2) ⬇ Backup / ⬆ Restore: one file with all projects and settings, kept wherever you like
+   3) the browser is asked to keep this data permanently */
+const MIRROR_KEYS=['toontalk2','toontalk-voicetags','toontalk-actions','toontalk-favvoices','toontalk-server','toontalk-pid','toontalk-movie'];
+let mirrorT=0,mirrorReady=false;
+function mirrorSave(){
+  if(!mirrorReady)return;
+  clearTimeout(mirrorT);
+  mirrorT=setTimeout(()=>{try{const o={};MIRROR_KEYS.forEach(k=>{const v=localStorage.getItem(k);if(v!=null)o[k]=v;});lsMetaPut('mirror',o);}catch(e){}},700);
+}
+async function mirrorRestore(){
+  try{
+    if(!TT_FRESH||sessionStorage.getItem('toontalk-restored'))return;
+    const m=await lsMetaGet('mirror');if(!m||!m['toontalk2'])return;
+    MIRROR_KEYS.forEach(k=>{if(m[k]!=null)try{localStorage.setItem(k,m[k]);}catch(e){}});
+    if(!localStorage.getItem('toontalk2'))return;
+    try{sessionStorage.setItem('toontalk-restored','1');}catch(e){}
+    mirrorReady=false;location.reload();return;
+  }catch(e){}finally{if(!sessionStorage.getItem('toontalk-restored')||!TT_FRESH)mirrorReady=true;}
+}
+try{if(sessionStorage.getItem('toontalk-restored')){sessionStorage.removeItem('toontalk-restored');setTimeout(()=>{try{$('status').textContent='The browser had emptied its memory. ToonTalk brought your episode and settings back from its backup copy.';}catch(e){}},600);}}catch(e){}
+mirrorRestore();
+async function dataNote(){
+  try{
+    const per=navigator.storage&&navigator.storage.persisted?await navigator.storage.persisted():false;
+    let est='';try{const e=await navigator.storage.estimate();est=' · using '+(e.usage/1048576).toFixed(1)+' MB';}catch(x){}
+    return (per?'🔒 Your browser has promised to keep your ToonTalk data'+est+'.':'⚠ Your browser has not promised to keep your data'+est+'. Press “Protect my data”, and make a backup now and then.')+(location.protocol==='file:'?' You opened this as a file: data saved this way is separate from the website and the installed app.':'');
+  }catch(e){return '';}
+}
+async function backupAll(){
+  const o={app:'toontalk-backup',v:1,t:Date.now(),origin:location.origin,ls:{},projects:[]};
+  MIRROR_KEYS.forEach(k=>{const v=localStorage.getItem(k);if(v!=null)o.ls[k]=v;});
+  try{o.projects=await dbAll('projects');}catch(e){}
+  const blob=new Blob([JSON.stringify(o)],{type:'application/json'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download='toontalk-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
+  return o.projects.length;
+}
+async function restoreAll(file){
+  let o;try{o=JSON.parse(await file.text());}catch(e){throw new Error('This is not a ToonTalk backup file.');}
+  if(!o||o.app!=='toontalk-backup')throw new Error('This is not a ToonTalk backup file.');
+  let n=0;for(const p of (o.projects||[])){if(p&&p.id){await dbPut('projects',p);n++;}}
+  Object.keys(o.ls||{}).forEach(k=>{if(MIRROR_KEYS.includes(k))try{localStorage.setItem(k,o.ls[k]);}catch(e){}});
+  return n;
+}
+function dataBar(){
+  const h=$('projPage');if(!h||$('dataBar'))return;
+  const box=document.createElement('div');box.id='dataBar';box.style.cssText='display:flex;flex-direction:column;gap:8px;margin:8px 0';
+  const note=document.createElement('div');note.className='hint';note.style.textAlign='center';
+  const row=document.createElement('div');row.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+  const mk=(t,bg,fn)=>{const b=document.createElement('button');b.textContent=t;b.style.cssText='flex:1 1 140px;background:'+bg;b.onclick=fn;return b;};
+  const msg=document.createElement('div');msg.className='hint';msg.style.textAlign='center';
+  const fi=document.createElement('input');fi.type='file';fi.accept='.json,application/json';fi.style.display='none';
+  const refresh=async()=>{note.textContent=await dataNote();};
+  row.append(
+    mk('🔒 Protect my data','#ffd43b',async()=>{let g=false;try{g=await navigator.storage.persist();}catch(e){}await refresh();msg.textContent=g?'Done: the browser will keep your data.':'The browser did not agree yet. Using ToonTalk a bit more, or installing it to your home screen, usually helps. Make a backup meanwhile.';}),
+    mk('⬇ Backup all','#b197fc',async()=>{try{const n=await backupAll();msg.textContent='Backup saved: '+n+' project'+(n===1?'':'s')+' and your settings. Keep the file somewhere safe (Drive, WhatsApp to yourself).';}catch(e){msg.textContent=String(e.message||e);}}),
+    mk('⬆ Restore backup','#74c0fc',()=>fi.click()),fi);
+  fi.onchange=async()=>{const f=fi.files[0];fi.value='';if(!f)return;if(!confirm('Restore this backup? Its projects are added (same ones are replaced) and your settings are replaced by the ones in the file.'))return;try{const n=await restoreAll(f);msg.textContent='Restored '+n+' project'+(n===1?'':'s')+'. Reloading…';setTimeout(()=>location.reload(),700);}catch(e){msg.textContent=String(e.message||e);}};
+  box.append(note,row,msg);
+  const list=$('projList');list.parentNode.insertBefore(box,list);
+  refresh();
+}
+function openProjects(){dataBar();renderProjects();$('projPage').hidden=false;}
 function closeProjects(){$('projPage').hidden=true;}
 $('btnNew').onclick=newEpisode;
 $('projNew').onclick=()=>{closeProjects();newEpisode();};
@@ -3029,7 +3124,7 @@ function drawMouth(name,emo,cy){
 /* ---------- STAGE E: your own moves (pose editor) and props ---------- */
 let CUSTOM={};
 try{CUSTOM=JSON.parse(localStorage.getItem('toontalk-actions')||'{}')||{};}catch(e){CUSTOM={};}
-function saveCustom(){try{localStorage.setItem('toontalk-actions',JSON.stringify(CUSTOM));}catch(e){}}
+function saveCustom(){try{localStorage.setItem('toontalk-actions',JSON.stringify(CUSTOM));}catch(e){}try{mirrorSave();}catch(e){}}
 const cKey=t=>String(t||'').toLowerCase().replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
 const POSE0=()=>({la:[12,8],ra:[12,8],ll:[-5,-5],rl:[5,5],lean:0,tilt:0,dy:0,dx:0});
 function lerpPose(a,b,u){const L=(x,y)=>x+(y-x)*u,A=(x,y)=>[L(x[0],y[0]),L(x[1],y[1])];
@@ -4158,7 +4253,7 @@ async function vlPlay(v,btn){
 /* ---------- favorite voices: save the voices you like for a girl, boy, grandfather, animal... and pick them in one tap ---------- */
 const FAVCATS=[['girl','👧 Girl'],['boy','👦 Boy'],['tgirl','🧑 Teen girl'],['tboy','🧑 Teen boy'],['woman','👩 Woman'],['man','👨 Man'],['gma','👵 Grandmother'],['gpa','👴 Grandfather'],['baby','👶 Baby'],['animal','🐾 Animal'],['narr','🎙 Narrator / other']];
 let favVoices={};try{favVoices=JSON.parse(localStorage.getItem('toontalk-favvoices')||'{}')||{};}catch(e){}
-function saveFavs(){try{localStorage.setItem('toontalk-favvoices',JSON.stringify(favVoices));}catch(e){}}
+function saveFavs(){try{localStorage.setItem('toontalk-favvoices',JSON.stringify(favVoices));}catch(e){}try{mirrorSave();}catch(e){}}
 function favAdd(cat,id){const a=favVoices[cat]||(favVoices[cat]=[]);if(!a.includes(id))a.push(id);saveFavs();}
 function favDel(cat,id){favVoices[cat]=(favVoices[cat]||[]).filter(x=>x!==id);saveFavs();}
 function favLabelsOf(id){return FAVCATS.filter(([k])=>(favVoices[k]||[]).includes(id)).map(x=>x[1]);}
@@ -4231,10 +4326,32 @@ function vlRender(){
 const LS_LANGS=[['lug','Luganda'],['xog','Lusoga'],['nyn','Runyankole'],['ach','Acholi'],['teo','Ateso'],['lgg','Lugbara'],['kin','Kinyarwanda'],['swa','Swahili'],['eng','English']];
 const lsName=c=>(LS_LANGS.find(l=>l[0]===c)||[c,c.toUpperCase()])[1];
 let LSD=null,lsRec=null,lsAudio=null,lsFilter={lang:'',verdict:'',profile:''},lsCache=[],lsBusy='';
-function lsDB(){return new Promise((ok,no)=>{try{const q=indexedDB.open('toontalk-studio',2);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains('clips'))d.createObjectStore('clips',{keyPath:'id'});if(!d.objectStoreNames.contains('profiles'))d.createObjectStore('profiles',{keyPath:'id'});};q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error);}catch(e){no(e);}});}
+function lsDB(){return new Promise((ok,no)=>{try{const q=indexedDB.open('toontalk-studio',3);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains('clips'))d.createObjectStore('clips',{keyPath:'id'});if(!d.objectStoreNames.contains('profiles'))d.createObjectStore('profiles',{keyPath:'id'});if(!d.objectStoreNames.contains('meta'))d.createObjectStore('meta',{keyPath:'k'});};q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error);}catch(e){no(e);}});}
 async function lsAll(){const db=await lsDB();return new Promise((ok,no)=>{const r=db.transaction('clips').objectStore('clips').getAll();r.onsuccess=()=>ok((r.result||[]).sort((a,b)=>b.created-a.created));r.onerror=()=>no(r.error);});}
 async function lsPut(c){const db=await lsDB();return new Promise((ok,no)=>{const t=db.transaction('clips','readwrite');t.objectStore('clips').put(c);t.oncomplete=()=>ok();t.onerror=()=>no(t.error);});}
 async function lsDel(id){const db=await lsDB();return new Promise((ok,no)=>{const t=db.transaction('clips','readwrite');t.objectStore('clips').delete(id);t.oncomplete=()=>ok();t.onerror=()=>no(t.error);});}
+/* ---- keep an unfinished recording and the form across refreshes ---- */
+async function lsMetaGet(k){try{const db=await lsDB();return await new Promise((ok,no)=>{const r=db.transaction('meta').objectStore('meta').get(k);r.onsuccess=()=>ok(r.result?r.result.v:null);r.onerror=()=>no(r.error);});}catch(e){return null;}}
+async function lsMetaPut(k,v){try{const db=await lsDB();await new Promise((ok,no)=>{const t=db.transaction('meta','readwrite');t.objectStore('meta').put({k,v});t.oncomplete=()=>ok();t.onerror=()=>no(t.error);});}catch(e){}}
+async function lsMetaDel(k){try{const db=await lsDB();await new Promise((ok,no)=>{const t=db.transaction('meta','readwrite');t.objectStore('meta').delete(k);t.oncomplete=()=>ok();t.onerror=()=>no(t.error);});}catch(e){}}
+let lsDraftTimer=0,lsDraftLoaded=false,lsApplyProf=false;
+function lsDraftSave(now){
+  clearTimeout(lsDraftTimer);
+  lsDraftTimer=setTimeout(()=>{
+    const g=id=>$(id);if(!g('lsText'))return;
+    const has=!!(LSD&&LSD.blob),txt=g('lsText').value.trim();
+    if(!has&&!txt){lsMetaDel('draft');return;}
+    lsMetaPut('draft',{blob:has?LSD.blob:null,mime:has?LSD.mime:'',dur:has?LSD.dur:0,heard:has?LSD.heard:'',score:has?LSD.score:null,verdict:has?LSD.verdict:'',peaks:has?LSD.peaks:null,text:g('lsText').value,lang:g('lsLang').value,spk:g('lsSpk').value,acc:g('lsAcc').value,con:g('lsCon').checked,prof:lsActiveProf||'',t:Date.now()});
+  },now===true?0:350);
+}
+window.addEventListener('pagehide',()=>{try{lsDraftSave(true);}catch(e){}});
+async function lsStorageNote(){
+  try{
+    const per=navigator.storage&&navigator.storage.persisted?await navigator.storage.persisted():false;
+    let est='';try{const e=await navigator.storage.estimate();est=' · using '+(e.usage/1048576).toFixed(1)+' MB';}catch(x){}
+    return per?'🔒 Your browser promised to keep this data'+est+'.':'⚠ Your browser has not promised to keep this data'+est+'. It can be cleared if the phone runs low on space, so export a backup now and then.';
+  }catch(e){return '';}
+}
 /* ---- accent profiles: one per language + region + speaker ---- */
 let LS_PROFILES=[];
 async function lsProfAll(){const db=await lsDB();return new Promise((ok,no)=>{const r=db.transaction('profiles').objectStore('profiles').getAll();r.onsuccess=()=>ok((r.result||[]).sort((a,b)=>a.created-b.created));r.onerror=()=>no(r.error);});}
@@ -4326,6 +4443,7 @@ async function lsExport(onlyOk,profileId){
   files.push({name:'profiles.json',data:enc.encode(JSON.stringify(profs.filter(p=>used.has(p.id)),null,1))});
   files.push({name:'README.txt',data:enc.encode('ToonTalk Language Studio export\nAudio: mono 16-bit WAV, 16 kHz, in the wavs folder.\nmetadata.csv: one line per clip, fields separated by |.\nverdict: ok = a speaker confirmed it is correct, fix = needs correction, blank = not judged.\nprofile: the accent profile (language + region + speaker) the clip belongs to.\nOnly use clips whose speakers gave consent (consent column).\nTo move this collection to another device: Language Studio > Import.\n')});
   const blob=lsZip(files),a=document.createElement('a'),pr=lsProf(profileId);
+  try{localStorage.setItem('toontalk-lsbackup',String(Date.now()));}catch(e){}
   a.href=URL.createObjectURL(blob);a.download='toontalk-'+(pr?pr.name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'-':'language-')+new Date().toISOString().slice(0,10)+'.zip';
   document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
   return all.length;
@@ -4397,7 +4515,15 @@ function lsProfForm(p){ // create or edit
 let lsActiveProf='';
 async function lsRender(keep){
   const box=$('lsBody');if(!box)return;
-  const keepForm=keep?{lang:$('lsLang')&&$('lsLang').value,text:$('lsText')&&$('lsText').value,spk:$('lsSpk')&&$('lsSpk').value,acc:$('lsAcc')&&$('lsAcc').value,con:$('lsCon')&&$('lsCon').checked}:null;
+  let keepForm=keep?{lang:$('lsLang')&&$('lsLang').value,text:$('lsText')&&$('lsText').value,spk:$('lsSpk')&&$('lsSpk').value,acc:$('lsAcc')&&$('lsAcc').value,con:$('lsCon')&&$('lsCon').checked}:null;
+  let restored=false;
+  if(!lsDraftLoaded){ // first time the studio opens after a page load: bring back an unfinished recording and form
+    lsDraftLoaded=true;const d=await lsMetaGet('draft');
+    if(d&&!LSD&&(d.blob||(d.text||'').trim())){
+      if(d.blob)LSD={blob:d.blob,mime:d.mime,dur:d.dur,heard:d.heard||'',score:d.score==null?null:d.score,verdict:d.verdict||'',peaks:d.peaks||null};
+      lsActiveProf=d.prof||'';keepForm={lang:d.lang,text:d.text,spk:d.spk,acc:d.acc,con:d.con};restored=true;
+    }
+  }
   try{lsCache=await lsAll();}catch(e){lsCache=[];}
   await lsLoadProfiles();
   if(lsActiveProf&&!lsProf(lsActiveProf))lsActiveProf='';
@@ -4422,7 +4548,7 @@ async function lsRender(keep){
     c.appendChild(lsEl('div',{className:'ls-meter'},[lsEl('i',{style:'width:'+pc+'%;background:#ffd43b'})]));
     c.appendChild(lsEl('div',{className:'hint',textContent:'Progress toward a trainable voice: about 3 hours of Correct audio. Fewer clips still work for animation: matching lines are played from the recording.'}));
     const bar=lsEl('div',{className:'ls-row'});
-    const bU=lsEl('button',{textContent:on?'● Recording into this profile':'🎙 Record into this',style:'background:'+(on?'#69db7c':'#a5d8ff')});bU.onclick=()=>{lsActiveProf=on?'':p.id;lsRender(true);};
+    const bU=lsEl('button',{textContent:on?'● Recording into this profile':'🎙 Record into this',style:'background:'+(on?'#69db7c':'#a5d8ff')});bU.onclick=()=>{lsActiveProf=on?'':p.id;lsApplyProf=true;lsRender(true);lsDraftSave();};
     const bX=lsEl('button',{textContent:'⬇ Export',style:'background:#b197fc'});bX.onclick=async()=>{lsMsg('Preparing the file…');try{const n=await lsExport(true,p.id);lsMsg('Exported '+n+' Correct clip(s) ✓');}catch(e){lsMsg(String(e.message||e),true);}};
     const bE=lsEl('button',{textContent:'✎ Edit',style:'background:#a5d8ff'});bE.onclick=async()=>{const q=lsProfForm(p);if(!q)return;await lsProfPut(q);lsRender(true);};
     const bD=lsEl('button',{textContent:'🗑',title:'Delete the profile (clips are kept)',style:'background:#868e96'});bD.onclick=async()=>{if(!confirm('Delete the profile “'+p.name+'”? Its clips are kept but lose the profile.'))return;for(const k of lsCache.filter(k=>k.profile===p.id)){k.profile='';await lsPut(k);}await lsProfDel(p.id);if(lsActiveProf===p.id)lsActiveProf='';lsRender(true);};
@@ -4435,7 +4561,7 @@ async function lsRender(keep){
   const lang=lsEl('select',{id:'lsLang'});LS_LANGS.forEach(([c,n])=>lang.appendChild(lsEl('option',{value:c,textContent:n})));lang.appendChild(lsEl('option',{value:'_o',textContent:'Other language…'}));
   lang.onchange=()=>{if(lang.value==='_o'){const c=(prompt('Type the 3-letter language code (for example: cgg, ttj, myx)')||'').trim().toLowerCase();if(/^[a-z]{3}$/.test(c)){if(![...lang.options].some(o=>o.value===c))lang.insertBefore(lsEl('option',{value:c,textContent:c.toUpperCase()}),lang.lastChild);lang.value=c;}else lang.value='lug';}};
   const psel=lsEl('select',{id:'lsProfSel'});psel.appendChild(lsEl('option',{value:'',textContent:'No profile'}));LS_PROFILES.forEach(p=>psel.appendChild(lsEl('option',{value:p.id,textContent:p.name+' · '+lsName(p.lang)})));psel.value=lsActiveProf;
-  psel.onchange=()=>{lsActiveProf=psel.value;lsRender(true);};
+  psel.onchange=()=>{lsActiveProf=psel.value;lsApplyProf=true;lsRender(true);lsDraftSave();};
   const text=lsEl('textarea',{id:'lsText',rows:2,placeholder:'The word or line the speaker is trying to say, written in the language',style:'width:100%'});
   const spk=lsEl('input',{id:'lsSpk',placeholder:'Speaker name',list:'lsSpkList'});const sl=lsEl('datalist',{id:'lsSpkList'});[...new Set(lsCache.map(c=>c.speaker).filter(Boolean))].forEach(s=>sl.appendChild(lsEl('option',{value:s})));
   const acc=lsEl('input',{id:'lsAcc',placeholder:'Accent / region (e.g. Busoga, Masaka)'});
@@ -4461,12 +4587,15 @@ async function lsRender(keep){
   card.append(lsEl('div',{className:'ls-row'},[bRec,bUp,fin]),meter,wave,lsEl('div',{className:'ls-row'},[bPlay,bChk,bSave]),lsEl('div',{id:'lsRes'}),lsEl('div',{id:'lsMsg',className:'hint'}));
   box.appendChild(card);
   if(keepForm){if(keepForm.lang&&[...lang.options].some(o=>o.value===keepForm.lang))lang.value=keepForm.lang;text.value=keepForm.text||'';spk.value=keepForm.spk||'';acc.value=keepForm.acc||'';con.querySelector('input').checked=!!keepForm.con;}
-  if(ap){lang.value=[...lang.options].some(o=>o.value===ap.lang)?ap.lang:(lang.insertBefore(lsEl('option',{value:ap.lang,textContent:ap.lang.toUpperCase()}),lang.lastChild),ap.lang);spk.value=ap.speaker||spk.value;acc.value=ap.region||acc.value;con.querySelector('input').checked=!!ap.consent;}
+  if(ap&&(lsApplyProf||!keepForm)){lang.value=[...lang.options].some(o=>o.value===ap.lang)?ap.lang:(lang.insertBefore(lsEl('option',{value:ap.lang,textContent:ap.lang.toUpperCase()}),lang.lastChild),ap.lang);spk.value=ap.speaker||spk.value;acc.value=ap.region||acc.value;con.querySelector('input').checked=!!ap.consent;}
+  lsApplyProf=false;
+  [text,spk,acc].forEach(e=>e.addEventListener('input',lsDraftSave));con.querySelector('input').addEventListener('change',lsDraftSave);lang.addEventListener('change',lsDraftSave);
   lsDrawWave(wave,LSD&&LSD.peaks);lsShowRes();lsDraftBtns();
+  if(restored)lsMsg('Restored your unfinished recording and text from before the refresh ✓');
   const setClip=async(blob,ms)=>{
     lsMsg('');LSD={blob,mime:blob.type,dur:Math.round(ms)/1000,heard:'',score:null,verdict:'',peaks:null};
     try{const b=await lsDecode(blob);LSD.dur=Math.round(b.duration*100)/100;LSD.peaks=lsPeaks(b,120);}catch(e){lsMsg('This audio could not be read. Try a .wav, .mp3 or .m4a file.',true);LSD=null;}
-    lsDrawWave(wave,LSD&&LSD.peaks);lsShowRes();lsDraftBtns();
+    lsDrawWave(wave,LSD&&LSD.peaks);lsShowRes();lsDraftBtns();lsDraftSave();
   };
   bRec.onclick=async()=>{
     if(lsRec){const r=await lsRec.stop();lsRec=null;bRec.textContent='⏺ Record';$('lsLvl').style.width='0';if(r.blob.size>500)await setClip(r.blob,r.ms);else lsMsg('Nothing was recorded. Try again.',true);return;}
@@ -4478,18 +4607,20 @@ async function lsRender(keep){
   bChk.onclick=async()=>{
     if(!LSD)return;if(!$('lsText').value.trim()){lsMsg('Type the word or line the speaker meant to say first.',true);return;}
     bChk.disabled=true;bChk.textContent='Listening…';lsMsg('');
-    try{LSD.heard=await lsTranscribe(LSD.blob,$('lsLang').value);const c=lsCompare($('lsText').value,LSD.heard);LSD.score=c.score;lsShowRes();}
+    try{LSD.heard=await lsTranscribe(LSD.blob,$('lsLang').value);const c=lsCompare($('lsText').value,LSD.heard);LSD.score=c.score;lsShowRes();lsDraftSave();}
     catch(e){lsMsg(String(e.message||e),true);}
     bChk.textContent='🧠 Check';lsDraftBtns();
   };
   bSave.onclick=async()=>{
     if(!LSD)return;const t=$('lsText').value.trim();if(!t){lsMsg('Type the word or line first.',true);return;}
     const c={id:'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),created:Date.now(),lang:$('lsLang').value,text:t,speaker:$('lsSpk').value.trim(),accent:$('lsAcc').value.trim(),profile:lsActiveProf||'',consent:$('lsCon').checked,mime:LSD.mime,blob:LSD.blob,dur:LSD.dur,heard:LSD.heard,score:LSD.score,verdict:LSD.verdict};
-    try{await lsPut(c);try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist();}catch(e){}LSD=null;$('lsText').value='';lsRender(true);setTimeout(()=>lsMsg('Saved ✓'),60);}catch(e){lsMsg('Could not save on this device: '+(e.message||e),true);}
+    try{await lsPut(c);try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist();}catch(e){}LSD=null;$('lsText').value='';await lsMetaDel('draft');lsRender(true);setTimeout(()=>lsMsg('Saved ✓'),60);}catch(e){lsMsg('Could not save on this device: '+(e.message||e),true);}
   };
   // --- library
   const tot=lsCache.reduce((a,c)=>a+(c.blob?c.blob.size:0),0);
   box.appendChild(lsEl('div',{className:'vl-h',textContent:'My clips ('+lsCache.length+(lsCache.length?' · '+(tot/1048576).toFixed(1)+' MB':'')+')'}));
+  const stn=lsEl('div',{className:'hint',id:'lsStore'});box.appendChild(stn);
+  lsStorageNote().then(t=>{const e=$('lsStore');if(e){let w='';try{const lb=+localStorage.getItem('toontalk-lsbackup')||0;const newest=lsCache.length?Math.max(...lsCache.map(c=>c.created)):0;if(lsCache.length&&(!lb||newest>lb))w='  ⚠ You have clips that are not in any backup yet: press Export all.';else if(lb)w='  Last backup: '+new Date(lb).toLocaleDateString()+'.';}catch(x){}e.textContent=t+w;}});
   const fp=lsEl('select',{id:'lsFp'});fp.appendChild(lsEl('option',{value:'',textContent:'All profiles'}));fp.appendChild(lsEl('option',{value:'none',textContent:'No profile'}));LS_PROFILES.forEach(p=>fp.appendChild(lsEl('option',{value:p.id,textContent:p.name})));fp.value=lsFilter.profile||'';fp.onchange=()=>{lsFilter.profile=fp.value;lsRender(true);};
   const fl=lsEl('select',{id:'lsFl'});fl.appendChild(lsEl('option',{value:'',textContent:'All languages'}));[...new Set(lsCache.map(c=>c.lang))].forEach(c=>fl.appendChild(lsEl('option',{value:c,textContent:lsName(c)})));fl.value=lsFilter.lang;fl.onchange=()=>{lsFilter.lang=fl.value;lsRender(true);};
   const fv=lsEl('select',{id:'lsFv'});[['','All'],['ok','Correct'],['fix','Needs correction'],['unsure','Not sure'],['none','Not judged']].forEach(([v,n])=>fv.appendChild(lsEl('option',{value:v,textContent:n})));fv.value=lsFilter.verdict;fv.onchange=()=>{lsFilter.verdict=fv.value;lsRender(true);};
@@ -4508,7 +4639,7 @@ function lsShowRes(){
   const r=$('lsRes');if(!r)return;r.innerHTML='';if(!LSD||LSD.heard==null||(LSD.score==null&&!LSD.heard))return;
   const c=lsCompare($('lsText')?$('lsText').value:'',LSD.heard);
   r.appendChild(lsResBlock(c,LSD.heard));
-  const vb=lsEl('div',{className:'ls-row'},[['ok','✓ Correct','#69db7c'],['fix','✗ Needs correction','#ff8787'],['unsure','? Not sure','#adb5bd']].map(([v,n,col])=>{const b=lsEl('button',{textContent:n,style:'background:'+col+(LSD.verdict===v?';outline:3px solid #fff':'')});b.onclick=()=>{LSD.verdict=LSD.verdict===v?'':v;lsShowRes();};return b;}));
+  const vb=lsEl('div',{className:'ls-row'},[['ok','✓ Correct','#69db7c'],['fix','✗ Needs correction','#ff8787'],['unsure','? Not sure','#adb5bd']].map(([v,n,col])=>{const b=lsEl('button',{textContent:n,style:'background:'+col+(LSD.verdict===v?';outline:3px solid #fff':'')});b.onclick=()=>{LSD.verdict=LSD.verdict===v?'':v;lsShowRes();lsDraftSave();};return b;}));
   r.appendChild(vb);
 }
 function lsResBlock(c,heard){
@@ -4539,6 +4670,7 @@ function lsClipRow(c){
 }
 
 try{lsLoadProfiles().then(()=>{try{renderCards(true);}catch(e){}});}catch(e){}
+try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 $('btnStudio').onclick=()=>{$('langStudio').hidden=false;lsRender();};
 $('btnLab').onclick=()=>{vlRender();$('voiceLab').hidden=false;};
 $('vlClose').onclick=()=>{if(vlAudio){try{vlAudio.stop();}catch(e){}}$('voiceLab').hidden=true;};
@@ -5088,10 +5220,10 @@ function stopAll(silent){
   if(silent&&dispStream){dispStream.getTracks().forEach(t=>t.stop());dispStream=null;}
 }
 
-$('play').onclick=()=>start(false);
-$('rec').onclick=()=>start(true);
+$('play').onclick=()=>{movClear();start(false);};
+$('rec').onclick=()=>{movClear();start(true);};
 $('stop').onclick=()=>{stopAll(false);if(!recording)$('status').textContent='Stopped.';};
-['title','script','outro','bg','disp','speed','mode'].forEach(id=>$(id).addEventListener('input',()=>{save();if(!playing)build();}));
+['title','script','outro','bg','disp','speed','mode'].forEach(id=>$(id).addEventListener('input',()=>{movClear();save();if(!playing)build();}));
 
 const DEMO=['[scene: street]','[Kato waves]','Kato (happy): Hey Nakato! Did you see my new rolex?','[Nakato points]','Nakato (shocked): Where is it? Your plate is empty!','Kato (angry, walk center): Somebody ate my rolex!','Nakato (scared, run right): It was not me!','[Kato jumps]','Kato (laugh): Hahaha, I am joking, it is in my bag!','[Nakato bows]','Nakato (sad): Please never scare me again.'].join('\n');
 $('demo').onclick=()=>{
@@ -5138,6 +5270,173 @@ $('demo5').onclick=()=>{
   $('status').textContent='Animals demo loaded. Press Play.';
 };
 load();
+/* ---------- Movie board: a grid of scenes (like a comic strip / director's storyboard) joined into one movie ---------- */
+let MOV={title:'My movie',outro:'The End. Follow for more!',cards:true,walk:true,scenes:[]};
+const movNew=(n)=>({id:'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:'Scene '+n,bg:'day',cast:[],notes:'',script:''});
+const movClean=n=>String(n||'').replace(/[:\[\]()&,]/g,'').replace(/\s+/g,' ').trim().slice(0,20);
+function movLoad(){
+  try{const d=JSON.parse(localStorage.getItem('toontalk-movie')||'null');if(d&&Array.isArray(d.scenes))MOV=Object.assign({title:'My movie',outro:'The End. Follow for more!',cards:true,walk:true},d);}catch(e){}
+  if(!MOV.scenes.length)MOV.scenes=[movNew(1),movNew(2)];
+}
+let movT=null;
+function movSave(){
+  clearTimeout(movT);
+  movT=setTimeout(()=>{try{localStorage.setItem('toontalk-movie',JSON.stringify(MOV));}catch(e){}try{mirrorSave();}catch(e){}projDirty();},400);
+}
+function movSet(m){ // used when opening/creating a project
+  MOV=Object.assign({title:'My movie',outro:'The End. Follow for more!',cards:true,walk:true},m||{});
+  if(!Array.isArray(MOV.scenes)||!MOV.scenes.length)MOV.scenes=[movNew(1),movNew(2)];
+  try{localStorage.setItem('toontalk-movie',JSON.stringify(MOV));}catch(e){}
+  if(!$('movPage').hidden)movRender();
+}
+function movSpoken(s){ // names that speak in this scene's lines
+  const out=[];
+  String(s.script||'').split('\n').forEach(l=>{
+    const m=l.trim().match(/^([^:\[\]()]{1,60}?)\s*(?:\([^)]*\))?\s*:\s*\S/);
+    if(m)m[1].split(/&|,|\band\b/i).map(movClean).forEach(n=>{if(n&&!/^everyone$/i.test(n)&&!out.includes(n))out.push(n);});
+  });
+  return out;
+}
+const movCast=s=>{const c=(s.cast||[]).map(movClean).filter(Boolean);movSpoken(s).forEach(n=>{if(!c.includes(n))c.push(n);});return c;};
+function movSecs(s){ // rough running time of a scene in seconds
+  const cps=Math.max(8,+$('speed').value||22);let t=1.2;
+  String(s.script||'').split('\n').forEach(l=>{
+    l=l.trim();if(!l)return;
+    let m=l.match(/^\[\s*(?:pause|wait|beat)\s*(\d+(?:\.\d+)?)?/i);if(m){t+=m[1]?+m[1]:0.7;return;}
+    m=l.match(/^[^\[\]:]{1,60}?\s*(?:\([^)]*\))?\s*:\s*(.+)$/);
+    if(m){t+=m[1].length/cps*1.25+0.6;return;}
+    if(l[0]==='[')t+=1;
+  });
+  if(MOV.walk)t+=movCast(s).length?3:0;
+  return t;
+}
+const movFmt=t=>{t=Math.round(t);return Math.floor(t/60)+':'+String(t%60).padStart(2,'0');};
+function movScript(list){
+  const L=[];
+  list.forEach((s,i)=>{
+    if(MOV.cards&&i>0)L.push('[title: '+(movClean(s.name)||('Scene '+(i+1)))+']');
+    L.push('[scene: '+(BGKEYS.includes(s.bg)?s.bg:'day')+']');
+    const cast=movCast(s);
+    if(MOV.walk)cast.forEach((n,j)=>L.push('['+n+' enters '+(j%2?'right':'left')+']'));
+    String(s.script||'').split('\n').forEach(l=>{if(l.trim())L.push(l.trim());});
+    if(MOV.walk)cast.forEach((n,j)=>L.push('['+n+' leaves '+(j%2?'left':'right')+']'));
+  });
+  return L.join('\n');
+}
+function movClear(){ // go back to normal single-episode playing
+  if(!MOVIE_OVR&&!MOVIE_FILE)return;
+  MOVIE_OVR=null;MOVIE_FILE='';
+  if(!playing){try{build();renderCards(true);}catch(e){}}
+}
+async function movPlay(only,rec){
+  const list=only==null?MOV.scenes:[MOV.scenes[only]];
+  if(!list.length)return;
+  if(rec){
+    const est=list.reduce((a,s)=>a+movSecs(s),0);
+    if(est>360&&!confirm('This is about '+movFmt(est)+' long. A video that long can use a lot of memory, especially on a phone. It is safer to make it scene by scene (🎬 on each scene) and join the parts. Make it in one go anyway?'))return;
+  }
+  const sc=list[0];
+  MOVIE_OVR={script:movScript(list),title:only==null?(MOV.title||''):(sc.name||''),outro:only==null?(MOV.outro||''):''};
+  MOVIE_FILE=only==null?(MOV.title||'movie'):((MOV.title||'movie')+' '+(sc.name||'scene'));
+  $('movPage').hidden=true;
+  await start(!!rec);
+  if(playing&&!$('status').textContent)$('status').textContent=only==null?'Playing your movie ('+list.length+' scenes, about '+movFmt(list.reduce((a,s)=>a+movSecs(s),0))+')...':'Playing scene: '+(sc.name||'');
+}
+async function movWrite(i){
+  const s=MOV.scenes[i],cast=movCast(s);
+  if(!s.notes.trim()&&!cast.length){$('movMsg').textContent='Write what happens in the scene (or pick who is in it) first.';return;}
+  $('movMsg').textContent='Writing lines for “'+s.name+'”...';
+  const o={task:'new',idea:(s.name+'. '+s.notes).slice(0,600),mode:'normal',lang:'en',tone:'funny',len:'short',count:Math.max(2,cast.length||2),names:cast,current:'',moves:Object.keys(CUSTOM)};
+  let r=await aiGenerate(o),text='',note='';
+  if(r.script){text=r.script;}
+  else{try{text=aiOffline(o);note=' (basic template; connect the AI helper for real writing)';}catch(e){}}
+  text=String(text||'').split('\n').filter(l=>!/^\[\s*(scene|mode|title|teacher|storyteller|moderator|proposition|opposition|picture)\b/i.test(l.trim())).join('\n').trim();
+  if(!text){$('movMsg').textContent='Could not write lines now. You can type them yourself.';return;}
+  s.script=s.script.trim()?s.script.trim()+'\n'+text:text;movSave();movRender();
+  $('movMsg').textContent='Lines added to “'+s.name+'”. Edit anything you like.'+note;
+}
+function movKnown(){
+  const set=new Set();Object.keys(cfg||{}).forEach(n=>set.add(n));(order||[]).forEach(n=>set.add(n));
+  MOV.scenes.forEach(s=>movCast(s).forEach(n=>set.add(n)));
+  return [...set].filter(Boolean);
+}
+function movTotals(){
+  const t=MOV.scenes.reduce((a,s)=>a+movSecs(s),0)+(MOV.cards?Math.max(0,MOV.scenes.length-1)*2.2:0)+4;
+  const el=$('movTotal');if(el)el.textContent=MOV.scenes.length+' scenes · about '+movFmt(t)+' of 15:00';
+  const bar=$('movBar');if(bar)bar.style.width=Math.min(100,t/9)+'%';
+  MOV.scenes.forEach((s,i)=>{const e=document.getElementById('movT'+i);if(e)e.textContent='≈ '+movFmt(movSecs(s));});
+}
+function movRender(){
+  const root=$('movBody');root.innerHTML='';
+  const E=lsEl;
+  $('movTitle').value=MOV.title;$('movOutro').value=MOV.outro;$('movCards').checked=!!MOV.cards;$('movWalk').checked=!!MOV.walk;
+  const known=movKnown();
+  const grid=E('div',{className:'mv-grid'});
+  MOV.scenes.forEach((s,i)=>{
+    const card=E('div',{className:'mv-card'});
+    const head=E('div',{className:'mv-head'});
+    head.appendChild(E('span',{className:'mv-n',textContent:String(i+1)}));
+    const nm=E('input',{type:'text',value:s.name,placeholder:'Scene name',maxLength:40});nm.oninput=()=>{s.name=nm.value;movSave();};head.appendChild(nm);
+    head.appendChild(E('span',{className:'mv-t',id:'movT'+i}));
+    card.appendChild(head);
+    const row=E('div',{className:'mv-row'});
+    row.appendChild(E('label',{textContent:'Place'}));
+    const bg=E('select');BGKEYS.forEach(k=>{const o=E('option',{value:k,textContent:k[0].toUpperCase()+k.slice(1)});if(k===s.bg)o.selected=true;bg.appendChild(o);});
+    bg.onchange=()=>{s.bg=bg.value;movSave();};row.appendChild(bg);card.appendChild(row);
+    card.appendChild(E('label',{className:'mv-l',textContent:'Who is in this scene (tap to pick)'}));
+    const chips=E('div',{className:'mv-chips'});
+    const auto=movSpoken(s);
+    known.forEach(n=>{
+      const on=(s.cast||[]).includes(n)||auto.includes(n);
+      const b=E('button',{className:'mv-chip'+(on?' on':''),textContent:n,title:auto.includes(n)&&!(s.cast||[]).includes(n)?'Speaks in the lines below':''});
+      b.onclick=()=>{
+        s.cast=s.cast||[];
+        if(auto.includes(n)){return;}
+        const k=s.cast.indexOf(n);if(k>=0)s.cast.splice(k,1);else s.cast.push(n);
+        movSave();movRender();
+      };chips.appendChild(b);
+    });
+    const add=E('input',{type:'text',placeholder:'+ new character',maxLength:20,className:'mv-add'});
+    add.onkeydown=e=>{if(e.key==='Enter'){const n=movClean(add.value);if(n){s.cast=s.cast||[];if(!s.cast.includes(n))s.cast.push(n);movSave();movRender();}}};
+    chips.appendChild(add);card.appendChild(chips);
+    card.appendChild(E('label',{className:'mv-l',textContent:'What happens (your notes, not spoken)'}));
+    const nt=E('textarea',{rows:2,value:s.notes,placeholder:'e.g. Kato finds a goat on the market roof and Mama gets angry'});nt.oninput=()=>{s.notes=nt.value;movSave();};card.appendChild(nt);
+    card.appendChild(E('label',{className:'mv-l',textContent:'Lines (same as the Write tab)'}));
+    const sc=E('textarea',{rows:6,value:s.script,placeholder:'Kato (happy): Hello Nakato!\n[Kato walks to Nakato]\nNakato (shocked): Look at that goat!',spellcheck:false});
+    sc.oninput=()=>{s.script=sc.value;movSave();movTotals();};card.appendChild(sc);
+    const bar=E('div',{className:'mv-bar'});
+    const B=(t,title,bgc,fn)=>{const b=E('button',{textContent:t,title,style:'background:'+bgc});b.onclick=fn;bar.appendChild(b);return b;};
+    B('✨ Write','Write lines from the notes','#ffd43b',()=>movWrite(i));
+    B('▶','Preview this scene','#69db7c',()=>movPlay(i,false));
+    B('🎬','Make a video of just this scene','#74c0fc',()=>movPlay(i,true));
+    B('◀','Move earlier','#adb5bd',()=>{if(i>0){[MOV.scenes[i-1],MOV.scenes[i]]=[MOV.scenes[i],MOV.scenes[i-1]];movSave();movRender();}});
+    B('▶','Move later','#adb5bd',()=>{if(i<MOV.scenes.length-1){[MOV.scenes[i+1],MOV.scenes[i]]=[MOV.scenes[i],MOV.scenes[i+1]];movSave();movRender();}}).textContent='▷';
+    B('⧉','Copy this scene','#b197fc',()=>{const c=JSON.parse(JSON.stringify(s));c.id=movNew(0).id;c.name=s.name+' copy';MOV.scenes.splice(i+1,0,c);movSave();movRender();});
+    B('🗑','Delete this scene','#ff8787',()=>{if(!confirm('Delete “'+s.name+'”?'))return;MOV.scenes.splice(i,1);if(!MOV.scenes.length)MOV.scenes.push(movNew(1));movSave();movRender();});
+    card.appendChild(bar);grid.appendChild(card);
+  });
+  const plus=E('button',{className:'mv-plus',textContent:'＋ Add scene'});
+  plus.onclick=()=>{MOV.scenes.push(movNew(MOV.scenes.length+1));movSave();movRender();setTimeout(()=>{const g=$('movBody');g.scrollTop=g.scrollHeight;},50);};
+  grid.appendChild(plus);
+  root.appendChild(grid);
+  movTotals();
+}
+function movOpen(){movLoad2();movRender();$('movMsg').textContent='';$('movPage').hidden=false;}
+function movLoad2(){if(!MOV.scenes.length)MOV.scenes=[movNew(1),movNew(2)];}
+$('btnMovie').onclick=()=>{movClear();stopAll(true);movOpen();};
+$('movClose').onclick=()=>{$('movPage').hidden=true;};
+$('movTitle').oninput=()=>{MOV.title=$('movTitle').value;movSave();};
+$('movOutro').oninput=()=>{MOV.outro=$('movOutro').value;movSave();};
+$('movCards').onchange=()=>{MOV.cards=$('movCards').checked;movSave();movTotals();};
+$('movWalk').onchange=()=>{MOV.walk=$('movWalk').checked;movSave();movTotals();};
+$('movAddCur').onclick=()=>{
+  const s=movNew(MOV.scenes.length+1);s.name=($('title').value||'Scene').slice(0,40);s.bg=$('bg').value||'day';s.script=$('script').value.split('\n').filter(l=>!/^\[\s*(scene|mode|title)\b/i.test(l.trim())).join('\n').trim();
+  MOV.scenes.push(s);movSave();movRender();$('movMsg').textContent='Your Write-tab script was added as a new scene.';
+};
+$('movPlay').onclick=()=>movPlay(null,false);
+$('movRec').onclick=()=>movPlay(null,true);
+movLoad();
+
 build();
 loadVoices();
 loadServerVoices();
