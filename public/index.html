@@ -51,6 +51,19 @@
   .fig{flex:1;padding:8px 4px;font-size:12px;background:#2a2a3a;color:#ddd;border:2px solid transparent}
   .fig span{display:block;font-size:20px}
   .fig.on{border-color:#ffd43b;color:#fff}
+  #musPage[hidden]{display:none}
+  #musPage{position:fixed;inset:0;background:#12121a;z-index:42;overflow:auto;padding:16px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+  #musBody{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+  #musPage .phead,#musPage>.hint{max-width:640px;margin-left:auto;margin-right:auto}
+  .mu-row{display:flex;gap:8px;flex-wrap:wrap}.mu-row>*{flex:1 1 140px}
+  .mu-list{display:flex;flex-direction:column;gap:6px}.mu-clip{display:flex;gap:6px;background:#1e1e2c;border:2px solid #2c2c3c;border-radius:10px;padding:6px}.mu-clip.on{border-color:#ffd43b}
+  .mu-clip .mu-name{flex:1;text-align:left;background:transparent;color:#fff;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mu-clip button:not(.mu-name){flex:0 0 44px;padding:8px 0}
+  .mu-form{display:flex;flex-direction:column;gap:8px;background:#1a1a26;border:1px solid #2c2c3c;border-radius:12px;padding:12px}
+  #pipPage[hidden]{display:none}
+  #pipPage{position:fixed;inset:0;background:#12121a;z-index:43;overflow:auto;padding:16px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+  #pipBody{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+  .pip-list{display:flex;flex-direction:column;gap:8px}.pip-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:#1e1e2c;border:2px solid #2c2c3c;border-radius:10px;padding:8px}
+  .pip-info{flex:1 1 200px;min-width:0}.pip-bar{display:flex;gap:6px;align-items:center;flex:0 1 auto}.pip-bar button{flex:0 0 auto;padding:9px 12px}.pip-row>button{flex:1 1 100%}
   #movPage[hidden]{display:none}
   #movPage{position:fixed;inset:0;background:#12121a;z-index:41;overflow:auto;padding:16px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}
   .mv-top{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.mv-top input{flex:1 1 220px}
@@ -182,6 +195,7 @@
     <button id="btnSave" style="background:#b2f2bb">💾 Save</button>
     <button id="btnProj" style="background:#ffec99">📁 My projects</button>
     <button id="btnMovie" style="background:#ffa8a8">🎞 Movie board</button>
+    <button id="btnSing" style="background:#eebefa">🎤 Sing along</button>
   </div>
   <div class="hint" id="savedAt"></div>
   <div class="row" id="actions">
@@ -246,6 +260,7 @@ Mama (love): Okay okay, I will make you both chapati.</textarea>
     <div class="row"><div><label>Figure style for all characters</label><select id="figAll"></select></div><button id="figApply" style="flex:0 0 auto;background:#d0bfff">Apply to all</button></div>
   <div class="hint">Characters in your script appear below. Pick a voice for each one. For <b>Luganda lines</b> choose “Blip sounds” (no browser has a Luganda voice yet), the words still show as subtitles.</div>
   <div class="hint" id="srvstat"></div>
+  <button id="btnPiper" style="background:#96f2d7">🗣 Offline voices (Piper): download voices that work without internet</button>
   <button id="btnLab" style="background:#d0bfff">🎧 Voice lab: listen to the voices and sort them</button>
   <button id="btnStudio" style="background:#ffa8a8">🎙️ Language Studio: record real speakers, check and keep accents</button>
   <div id="cards"></div>
@@ -284,6 +299,15 @@ Mama (love): Okay okay, I will make you both chapati.</textarea>
   <div class="mv-act"><button id="movPlay" style="background:#69db7c">▶ Play whole movie</button><button id="movRec" style="background:#ff922b">🎬 Create movie video</button><button id="movAddCur" style="background:#a5d8ff">⬇ Add my Write script as a scene</button></div>
   <div class="hint" id="movMsg"></div>
   <div id="movBody"></div>
+</div>
+<div id="musPage" hidden>
+  <div class="phead"><h2>🎤 Sing along</h2><button id="musClose">✕ Close</button></div>
+  <div class="hint" id="musMsg"></div>
+  <div id="musBody"></div>
+</div>
+<div id="pipPage" hidden>
+  <div class="phead"><h2>🗣 Offline voices</h2><button id="pipClose">✕ Close</button></div>
+  <div id="pipBody"></div>
 </div>
 <div id="voiceLab" hidden><div class="vl-w">
   <div style="display:flex;gap:8px;align-items:center"><b style="font-size:18px;flex:1">🎧 Voice lab</b><button id="vlClose" style="flex:0 0 auto;background:#adb5bd">✕ Close</button></div>
@@ -492,7 +516,7 @@ async function fxApply(buf,key){
 /* ---------- server voices (natural voices from server.js) ---------- */
 let API=location.protocol==='file:'?'http://localhost:3000':'';
 try{const sv=localStorage.getItem('toontalk-server');if(sv)API=sv.replace(/\/+$/,'');}catch(e){}
-let srvVoices=[],srvOnline=false;
+let srvVoices=[],srvOnline=false,PIPER_VOICES=[];
 async function loadServerVoices(){
   try{
     const r=await fetch(API+'/api/voices');
@@ -504,6 +528,7 @@ async function loadServerVoices(){
     srvVoices=[];srvOnline=false;
     $('srvstat').textContent='Voice server offline: using browser voices. Run  npm start  and open http://localhost:3000';
   }
+  if(PIPER_VOICES.length){srvVoices=srvVoices.concat(PIPER_VOICES);srvOnline=true;$('srvstat').textContent=($('srvstat').textContent+' Offline Piper voices ready: '+PIPER_VOICES.length+'.').trim();}
   renderCards(true);
 }
 function resolveSrv(f,i){
@@ -519,6 +544,7 @@ async function fetchLine(s,sv){
   const ck=[sv.id,s.text,rate.toFixed(2),pitch.toFixed(2),fac.toFixed(2),f.fx||''].join('|');
   const hit=VOICE_CACHE.get(ck);
   if(hit){s.buf=hit.buf;s.vis=hit.vis;return;}
+  if(sv.prov==='piper'){await fetchPiper(s,sv,rate,pitch,ck);return;}
   let last=null;
   for(let tries=0;tries<3;tries++){ // a slow or dropped connection gets two more chances
     try{
@@ -642,6 +668,8 @@ function build(){
     if(m){TSTYLE=m[1].toLowerCase();return;}
     m=l.match(/^\[\s*scene\s*:\s*([a-z]+)(?:\s*[, ]\s*(fade|wipe|slide|iris|zoom|flash|cut))?\s*\]$/i);
     if(m){const k=m[1].toLowerCase();if(BGKEYS.includes(k))segs.push({type:'scene',bg:k,tstyle:m[2]?m[2].toLowerCase():TSTYLE});return;}
+    m=l.match(/^\[\s*(?:music|sing\s*along|singalong|karaoke)\s*:\s*(.+?)\s*\]$/i);
+    if(m){segs.push(musParse(m[1]));return;}
     m=l.match(/^\[\s*(pause|wait|beat)\s*(\d+(?:\.\d+)?)?\s*(?:s|sec|secs|seconds?)?\s*\]$/i);
     if(m){const d=m[2]!=null?+m[2]:(/^beat$/i.test(m[1])?0.5:1);segs.push({type:'pause',dur:clamp(d,0.1,10)});return;}
     m=l.match(/^\[\s*(?:sfx|sound)\s*:\s*([a-z ]{2,20}?)\s*\]$/i);
@@ -4911,6 +4939,7 @@ function enterCore(i,now){
   if(s.type==='sfx')playSfx(s.name);
   if(s.type==='prop')propEnter(s,now);
   if(s.type==='pic')curPic=s.bg;
+  if(s.type==='music'){MUSP=[];musStart(s,now);}
   if(s.type==='cam')camSet(s,now);
   if(s.type==='line'){
     s.started=false;s.ended=false;s.boundary=-1;
@@ -4934,6 +4963,7 @@ function enterCore(i,now){
 function segDone(s,now){
   const el=(now-s.t0)/1000;
   if(s.type==='act'||s.type==='pause'||s.type==='sfx'||s.type==='cam'||s.type==='pic'||s.type==='prop')return el>=s.dur;
+  if(s.type==='music')return (s.missing||!s.buf)?el>=0.3:el>=s.dur+0.35;
   const hd=s.noHold?0.05:HOLD;
   if(s.type==='title')return el>=s.dur;
   if(s.type==='scene')return el>=(s.tdur||0.5);
@@ -4984,6 +5014,7 @@ function frame(now){
   const PP=LAYP=positions(),xs=PP.xs,sc=PP.s;
   const seg=playing?segs[idx]:null;
   let speaker=null,count=0,cur=-1,talking=false,emo='neutral',reactWho=null;
+  const MU=(seg&&seg.type==='music'&&seg.started&&seg.an)?musState(seg,now):null;
   if(seg&&seg.type==='line'){
     speaker=seg.who;emo=seg.emo;
     count=progress(seg,now);cur=curWord(seg,count);
@@ -5007,12 +5038,14 @@ function frame(now){
     let e='neutral';
     const isS=!!(seg&&seg.type==='line'&&(n===seg.who||(seg.co&&seg.co.some(c=>c.who===n))));
     if(isS)e=emo;else if(n===reactWho)e=seg.emo;else if(reacts){const r=reacts.find(r=>r.who===n);if(r)e=r.emo;}
-    drawActor(n,chars[n].i,xs,sc,talking&&isS,e,isS,tt,now);
+    if(MU)musDraw(n,MU,xs,sc,tt,now);else drawActor(n,chars[n].i,xs,sc,talking&&isS,e,isS,tt,now);
   });
+  if(playing&&(MU||MUSP.length))musParticles(now);
   if(playing)drawVehOvers(now);
   if(playing)drawProps(true,now);
   ctx.restore();
   if(playing&&curPic)drawPic(curPic,tt);
+  if(MU)musLabel(seg,now);
   if(seg&&seg.type==='line'){
     if($('disp').value==='caps')drawCaps(seg,count,cur);
     else drawBubble(seg,count,cur,curX(seg.who,xs),sc);
@@ -5030,13 +5063,14 @@ function frame(now){
 /* ---------- start / record / stop ---------- */
 async function start(withRec){
   build();
-  if(!segs.some(s=>s.type==='line')){$('status').textContent='Write at least one line like  Kato: hello';return;}
+  if(!segs.some(s=>s.type==='line'||s.type==='music')){$('status').textContent='Write at least one line like  Kato: hello';return;}
   ensureAudio();await actx.resume();
   stopAll(true);
   $('status').textContent='';
   $('result').hidden=true;
   resetStick();camReset();curPic=null;
   await prepareVoices();
+  await prepareClips();
   let tabAudio=null;
   if(withRec){
     const lost=segs.filter(sg=>sg.type==='line'&&!sg.buf&&cfg[sg.who].voice!=='blip').length;
@@ -5294,6 +5328,8 @@ function movSpoken(s){ // names that speak in this scene's lines
   String(s.script||'').split('\n').forEach(l=>{
     const m=l.trim().match(/^([^:\[\]()]{1,60}?)\s*(?:\([^)]*\))?\s*:\s*\S/);
     if(m)m[1].split(/&|,|\band\b/i).map(movClean).forEach(n=>{if(n&&!/^everyone$/i.test(n)&&!out.includes(n))out.push(n);});
+    const mu=l.match(/^\[\s*(?:music|sing\s*along|karaoke)\s*:.*?\bwho\s*:\s*([^;\]]+)/i);
+    if(mu)mu[1].split(/&|,|\band\b/i).map(movClean).forEach(n=>{if(n&&!/^(everyone|all)$/i.test(n)&&!out.includes(n))out.push(n);});
   });
   return out;
 }
@@ -5302,7 +5338,8 @@ function movSecs(s){ // rough running time of a scene in seconds
   const cps=Math.max(8,+$('speed').value||22);let t=1.2;
   String(s.script||'').split('\n').forEach(l=>{
     l=l.trim();if(!l)return;
-    let m=l.match(/^\[\s*(?:pause|wait|beat)\s*(\d+(?:\.\d+)?)?/i);if(m){t+=m[1]?+m[1]:0.7;return;}
+    let m=l.match(/^\[\s*(?:music|sing\s*along|karaoke)\s*:.*?\blength\s*:\s*([0-9:.]+)/i);if(m){t+=musTime(m[1])||30;return;}
+    m=l.match(/^\[\s*(?:pause|wait|beat)\s*(\d+(?:\.\d+)?)?/i);if(m){t+=m[1]?+m[1]:0.7;return;}
     m=l.match(/^[^\[\]:]{1,60}?\s*(?:\([^)]*\))?\s*:\s*(.+)$/);
     if(m){t+=m[1].length/cps*1.25+0.6;return;}
     if(l[0]==='[')t+=1;
@@ -5407,6 +5444,7 @@ function movRender(){
     const bar=E('div',{className:'mv-bar'});
     const B=(t,title,bgc,fn)=>{const b=E('button',{textContent:t,title,style:'background:'+bgc});b.onclick=fn;bar.appendChild(b);return b;};
     B('✨ Write','Write lines from the notes','#ffd43b',()=>movWrite(i));
+    B('🎤','Sing along to a music clip in this scene','#f783ac',()=>musOpen(i));
     B('▶','Preview this scene','#69db7c',()=>movPlay(i,false));
     B('🎬','Make a video of just this scene','#74c0fc',()=>movPlay(i,true));
     B('◀','Move earlier','#adb5bd',()=>{if(i>0){[MOV.scenes[i-1],MOV.scenes[i]]=[MOV.scenes[i],MOV.scenes[i-1]];movSave();movRender();}});
@@ -5436,6 +5474,468 @@ $('movAddCur').onclick=()=>{
 $('movPlay').onclick=()=>movPlay(null,false);
 $('movRec').onclick=()=>movPlay(null,true);
 movLoad();
+/* ---------- PIPER offline voices: natural voices that run inside the app, no internet or key needed after the download ---------- */
+const PIPER_BASE='vendor/piper/';
+const PIPER_HF=['https://huggingface.co/rhasspy/piper-voices/resolve/main/','https://huggingface.co/diffusionstudio/piper-voices/resolve/main/'];
+const PIPER_CAT=[ // id, label, gender (Female / Male / '' for many speakers), what it is good for
+  ['en_US-lessac-medium','Lessac (US)','Female','Clear storyteller'],['en_US-amy-medium','Amy (US)','Female','Friendly, bright'],['en_US-amy-low','Amy (US, light)','Female','Smaller and faster'],
+  ['en_US-hfc_female-medium','HFC (US)','Female','Warm woman'],['en_US-kristin-medium','Kristin (US)','Female','Calm woman'],['en_US-kathleen-low','Kathleen (US)','Female','Older woman'],
+  ['en_US-ryan-medium','Ryan (US)','Male','Strong man'],['en_US-joe-medium','Joe (US)','Male','Deep man'],['en_US-john-medium','John (US)','Male','Mature man'],
+  ['en_US-hfc_male-medium','HFC (US)','Male','Warm man'],['en_US-bryce-medium','Bryce (US)','Male','Young man'],['en_US-norman-medium','Norman (US)','Male','Older man'],
+  ['en_US-kusal-medium','Kusal (US)','Male','Youthful man'],['en_US-danny-low','Danny (US)','Male','Light man'],
+  ['en_GB-alan-medium','Alan (UK)','Male','British man'],['en_GB-alba-medium','Alba (Scottish)','Female','Scottish woman'],['en_GB-cori-medium','Cori (UK)','Female','British woman'],
+  ['en_GB-jenny_dioco-medium','Jenny (UK)','Female','British woman'],['en_GB-northern_english_male-medium','Northern English','Male','Northern man'],['en_GB-southern_english_female-low','Southern English','Female','Southern woman'],
+  ['en_GB-semaine-medium','Semaine (4 moods)','','Four acted voices (cheerful, angry, sad, calm)'],['en_GB-aru-medium','ARU (12 accents)','','Twelve different people'],['en_GB-vctk-medium','VCTK (100+ people)','','Over 100 different people'],
+  ['en_US-libritts_r-medium','LibriTTS (900 people)','','Hundreds of different people'],['en_US-l2arctic-medium','L2-ARCTIC (24 accents)','','Speakers with Arabic, Hindi, Korean, Chinese, Spanish and Vietnamese accents'],['en_US-arctic-medium','ARCTIC (18 people)','','Eighteen different people'],
+  ['sw_CD-lanfrica-medium','Swahili (Lanfrica)','','Swahili'],['fr_FR-siwis-medium','French (Siwis)','Female','French woman'],['fr_FR-upmc-medium','French (UPMC)','','Two French voices'],
+  ['es_ES-davefx-medium','Spanish (Davefx)','Male','Spanish man'],['de_DE-thorsten-medium','German (Thorsten)','Male','German man'],['pt_BR-faber-medium','Portuguese (Faber)','Male','Brazilian man'],
+  ['ar_JO-kareem-medium','Arabic (Kareem)','Male','Arabic man'],['it_IT-paola-medium','Italian (Paola)','Female','Italian woman']
+].map(([id,label,g,note])=>({id,label,g,note}));
+const PIPER_SPK_G={prudence:'Female',poppy:'Female',spike:'Male',obadiah:'Male',jessica:'Female',pierre:'Male'};
+const pipPath=id=>{const [l,n,q]=id.split('-');return l.split('_')[0]+'/'+l+'/'+n+'/'+q+'/'+id;};
+const pipMb=id=>/-x_low$/.test(id)?20:/-high$/.test(id)?110:63;
+const pipPack=id=>PIPER_CAT.find(c=>c.id===id)||{id,label:id,g:'',note:''};
+/* storage: its own small database */
+let pipDbp=null;
+const pipDb=()=>pipDbp||(pipDbp=new Promise((res,rej)=>{
+  if(!window.indexedDB)return rej(new Error('no indexedDB'));
+  const r=indexedDB.open('toontalk-piper',1);
+  r.onupgradeneeded=()=>{r.result.createObjectStore('files',{keyPath:'key'});};
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);
+}));
+const pipTx=(mode,fn)=>pipDb().then(d=>new Promise((res,rej)=>{const t=d.transaction('files',mode),o=fn(t.objectStore('files'));t.oncomplete=()=>res(o&&'result' in o?o.result:undefined);t.onerror=t.onabort=()=>rej(t.error);}));
+const pipGet=k=>pipTx('readonly',s=>s.get(k));
+const pipPutF=(k,blob)=>pipTx('readwrite',s=>{s.put({key:k,blob});});
+const pipDelF=k=>pipTx('readwrite',s=>{s.delete(k);});
+const pipKeys=()=>pipTx('readonly',s=>s.getAllKeys());
+/* engine: onnxruntime-web + the eSpeak phonemizer, both loaded from vendor/piper/ */
+let PIPER_ENG=null,PIPER_Q=Promise.resolve();
+const pipScript=src=>new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('Piper engine file missing: '+src+'. Run  node tools/get-piper.js  in your Toontalk folder.'));document.head.appendChild(s);});
+function pipEngine(){
+  return PIPER_ENG||(PIPER_ENG=(async()=>{
+    await pipScript(PIPER_BASE+'ort.wasm.min.js');
+    await pipScript(PIPER_BASE+'piper_phonemize.js');
+    ort.env.wasm.wasmPaths=new URL(PIPER_BASE,location.href).href;
+    ort.env.wasm.numThreads=1;
+    return true;
+  })().catch(e=>{PIPER_ENG=null;throw e;}));
+}
+const PIPER_SESS=new Map(),PIPER_CFG={};
+async function pipFetchModel(id,onp){ // saved copy, else the local piper/voices folder, else the internet
+  const have=await pipGet(id+'.onnx').catch(()=>null),haveJ=await pipGet(id+'.json').catch(()=>null);
+  if(have&&haveJ)return;
+  const pth=pipPath(id),srcs=[ 'piper/voices/'+id ,...PIPER_HF.map(b=>b+pth) ];
+  let err=null;
+  for(const base of srcs){
+    try{
+      const jr=await fetch(base+'.onnx.json');if(!jr.ok)throw new Error('HTTP '+jr.status);
+      const jtxt=await jr.text();JSON.parse(jtxt);
+      const r=await fetch(base+'.onnx');if(!r.ok)throw new Error('HTTP '+r.status);
+      const total=+(r.headers.get('Content-Length')||0),rd=r.body.getReader(),ch=[];let got=0;
+      for(;;){const {done,value}=await rd.read();if(done)break;ch.push(value);got+=value.length;if(onp)onp(got,total);}
+      const blob=new Blob(ch);
+      if(blob.size<100000)throw new Error('file too small');
+      await pipPutF(id+'.onnx',blob);await pipPutF(id+'.json',new Blob([jtxt],{type:'application/json'}));
+      return;
+    }catch(e){err=e;}
+  }
+  throw new Error('Could not download '+id+' ('+(err&&err.message||'no connection')+'). You need internet once for this download.');
+}
+async function pipConfig(id){
+  if(PIPER_CFG[id])return PIPER_CFG[id];
+  const f=await pipGet(id+'.json');if(!f)throw new Error('Voice not installed: '+id);
+  return (PIPER_CFG[id]=JSON.parse(await f.blob.text()));
+}
+async function pipSession(id){
+  if(PIPER_SESS.has(id)){const s=PIPER_SESS.get(id);PIPER_SESS.delete(id);PIPER_SESS.set(id,s);return s;}
+  await pipEngine();
+  const f=await pipGet(id+'.onnx');if(!f)throw new Error('Voice not installed: '+id);
+  const s=await ort.InferenceSession.create(await f.blob.arrayBuffer(),{executionProviders:['wasm']});
+  PIPER_SESS.set(id,s);
+  while(PIPER_SESS.size>2){const k=PIPER_SESS.keys().next().value;PIPER_SESS.delete(k);}
+  return s;
+}
+function pipPhonemes(text,espeakVoice){
+  return new Promise(async(resolve,reject)=>{
+    const to=setTimeout(()=>reject(new Error('phonemizer timeout')),30000);
+    try{
+      const mod=await createPiperPhonemize({
+        print:d=>{clearTimeout(to);try{resolve(JSON.parse(d).phoneme_ids);}catch(e){reject(e);}},
+        printErr:m=>{if(/error/i.test(String(m)))console.warn('piper phonemizer:',m);},
+        locateFile:u=>u.endsWith('.wasm')?PIPER_BASE+'piper_phonemize.wasm':u.endsWith('.data')?PIPER_BASE+'piper_phonemize.data':u
+      });
+      mod.callMain(['-l',espeakVoice,'--input',JSON.stringify([{text:text.trim()}]),'--espeak_data','/espeak-ng-data']);
+    }catch(e){clearTimeout(to);reject(e);}
+  });
+}
+function pipSplit(text,max=300){
+  const t=text.trim();if(!t)return [];if(t.length<=max)return [t];
+  const out=[];let cur='';
+  (t.match(/[^.!?…\n]+[.!?…]*\s*/g)||[t]).forEach(sn=>{if((cur+sn).length>max&&cur.trim()){out.push(cur.trim());cur='';}cur+=sn;});
+  if(cur.trim())out.push(cur.trim());return out;
+}
+async function pipSynth(id,sid,text,speed,pitch){ // returns an AudioBuffer
+  const job=PIPER_Q.then(async()=>{
+    const cfgj=await pipConfig(id),sess=await pipSession(id);
+    const k=clamp(Math.pow(pitch||1,0.6),0.7,1.5);
+    const scales=[cfgj.inference.noise_scale,(cfgj.inference.length_scale/Math.max(0.5,speed||1))*k,cfgj.inference.noise_w];
+    const parts=[];
+    for(const chunk of pipSplit(text)){
+      const ids=await pipPhonemes(chunk,cfgj.espeak.voice);
+      const feeds={input:new ort.Tensor('int64',BigInt64Array.from(ids.map(x=>BigInt(x))),[1,ids.length]),input_lengths:new ort.Tensor('int64',BigInt64Array.from([BigInt(ids.length)])),scales:new ort.Tensor('float32',Float32Array.from(scales))};
+      if(cfgj.num_speakers>1||Object.keys(cfgj.speaker_id_map||{}).length)feeds.sid=new ort.Tensor('int64',BigInt64Array.from([BigInt(sid||0)]));
+      const out=await sess.run(feeds);parts.push(Float32Array.from(out.output.data));
+    }
+    const n=parts.reduce((a,p)=>a+p.length,0),pcm=new Float32Array(n);let o=0;parts.forEach(p=>{pcm.set(p,o);o+=p.length;});
+    const sr=cfgj.audio.sample_rate;
+    ensureAudio();
+    let buf=actx.createBuffer(1,n,sr);buf.copyToChannel(pcm,0);
+    if(k!==1)buf=resampleBuf(buf,k);
+    return buf;
+  });
+  PIPER_Q=job.catch(()=>{});
+  return job;
+}
+async function fetchPiper(s,sv,rate,pitch,ck){
+  const [,id,sid]=sv.id.split(':');
+  const f=cfg[s.who];
+  let buf=await pipSynth(id,+sid||0,s.text,rate,pitch);
+  const fac=f.vtype?voiceFactor(f,sv):1;if(fac!==1)buf=resampleBuf(buf,fac);
+  if(f.fx)buf=await fxApply(buf,f.fx);
+  let vis=null;try{vis=analyzeVisemes(buf);}catch(x){}
+  s.buf=buf;s.vis=vis;
+  if(VOICE_CACHE.size>300)VOICE_CACHE.delete(VOICE_CACHE.keys().next().value);
+  VOICE_CACHE.set(ck,{buf,vis});
+}
+/* the voices the app offers from the installed packs */
+let PIPER_SHOW={};try{PIPER_SHOW=JSON.parse(localStorage.getItem('toontalk-piper-show')||'{}')||{};}catch(e){}
+async function pipRefresh(){
+  const out=[];
+  try{
+    const keys=(await pipKeys()).filter(k=>k.endsWith('.onnx')).map(k=>k.slice(0,-5));
+    for(const id of keys){
+      let c;try{c=await pipConfig(id);}catch(e){continue;}
+      const pk=pipPack(id),lang=id.split('-')[0].replace('_','-');
+      const map=c.speaker_id_map||{},names=Object.keys(map);
+      if(names.length>1){
+        const show=PIPER_SHOW[id]||24;
+        names.sort((a,b)=>map[a]-map[b]).slice(0,show).forEach(n=>out.push({id:'piper:'+id+':'+map[n],lang,gender:PIPER_SPK_G[n.toLowerCase()]||'',label:'Piper '+pk.label+' · '+n,prov:'piper',auto:false}));
+      }else out.push({id:'piper:'+id+':0',lang,gender:pk.g,label:'Piper '+pk.label,prov:'piper',auto:false});
+    }
+  }catch(e){}
+  PIPER_VOICES=out;return out;
+}
+/* the Offline voices page */
+async function pipPageRender(){
+  const root=$('pipBody');root.innerHTML='';const E=lsEl;
+  root.appendChild(E('div',{className:'hint',innerHTML:'<b>Piper</b> makes natural voices <b>inside the app</b>. Download a voice once (about 20 to 110 MB), then it works with no internet, no key and no limit. After downloading, pick it on each character card (its voice name starts with “Piper”). Use the <b>Voice effect</b> on a character to turn any voice into a child, baby, devil or monster. Voices made by Piper are slower to prepare than server voices, so the first Play can take a while.'}));
+  const eng=E('div',{className:'hint',id:'pipEng',textContent:'Checking the engine files...'});root.appendChild(eng);
+  fetch(PIPER_BASE+'ort-wasm-simd.wasm',{method:'HEAD'}).then(r=>{if(!r.ok)throw 0;eng.textContent='Engine files found ✓';}).catch(()=>{eng.innerHTML='⚠ Engine files are missing. In your Toontalk folder run <b>node tools/get-piper.js</b> once, then refresh this page.';eng.style.color='#ffa8a8';});
+  let have=[];try{have=(await pipKeys()).filter(k=>k.endsWith('.onnx')).map(k=>k.slice(0,-5));}catch(e){}
+  const list=E('div',{className:'pip-list'});root.appendChild(list);
+  PIPER_CAT.forEach(p=>{
+    const inst=have.includes(p.id);
+    const row=E('div',{className:'pip-row'});
+    const info=E('div',{className:'pip-info'},[E('b',{textContent:p.label+(p.g?'  ·  '+(p.g==='Female'?'woman':'man'):'')}),E('div',{className:'hint',textContent:p.note+' · '+p.id.split('-')[0].replace('_','-')+' · about '+pipMb(p.id)+' MB'})]);
+    const bar=E('div',{className:'pip-bar'});
+    const st=E('span',{className:'hint',textContent:inst?'Installed ✓':''});
+    const b=E('button',{textContent:inst?'▶ Test':'⬇ Download',style:'background:'+(inst?'#69db7c':'#ffd43b')});
+    const del=E('button',{textContent:'🗑',title:'Remove from this device',style:'background:#ff8787;flex:0 0 44px',hidden:!inst});
+    b.onclick=async()=>{
+      b.disabled=true;
+      try{
+        if(!have.includes(p.id)){
+          st.textContent='Downloading...';
+          await pipFetchModel(p.id,(g,t)=>{st.textContent='Downloading '+(t?Math.round(g*100/t)+'%':Math.round(g/1048576)+' MB');});
+          st.textContent='Installed ✓';
+          await pipRefresh();await loadServerVoices();pipPageRender();return;
+        }
+        st.textContent='Loading the voice (first time takes a moment)...';
+        const t0=performance.now();
+        const sv=(await pipRefresh()).find(v=>v.id.startsWith('piper:'+p.id+':'));
+        const [,id,sid]=sv.id.split(':');
+        const buf=await pipSynth(id,+sid||0,'Hello! This is my offline voice. I work without internet.',1,1);
+        ensureAudio();await actx.resume();const src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);src.start();
+        st.textContent='Played ✓ (made in '+((performance.now()-t0)/1000).toFixed(1)+' s)';
+      }catch(e){st.textContent=String(e.message||e).slice(0,160);}
+      b.disabled=false;
+    };
+    del.onclick=async()=>{if(!confirm('Remove “'+p.label+'” from this device? You can download it again.'))return;await pipDelF(p.id+'.onnx');await pipDelF(p.id+'.json');delete PIPER_CFG[p.id];PIPER_SESS.delete(p.id);await pipRefresh();await loadServerVoices();pipPageRender();};
+    bar.append(st,b,del);row.append(info,bar);
+    if(inst&&/-(libritts_r|vctk|l2arctic|arctic|aru|semaine|upmc)-/.test(p.id)){
+      const more=E('button',{textContent:'＋ Show 24 more speakers',style:'background:#a5d8ff'});
+      more.onclick=async()=>{PIPER_SHOW[p.id]=(PIPER_SHOW[p.id]||24)+24;try{localStorage.setItem('toontalk-piper-show',JSON.stringify(PIPER_SHOW));}catch(e){}await pipRefresh();await loadServerVoices();st.textContent='Showing '+PIPER_SHOW[p.id]+' speakers';};
+      row.appendChild(more);
+    }
+    list.appendChild(row);
+  });
+  root.appendChild(E('div',{className:'hint',innerHTML:'<b>Licences:</b> every voice has its own licence, written on its page at huggingface.co/rhasspy/piper-voices. Some are for non-commercial use only. Check the voice\'s page before you sell videos or the app that use it.'}));
+}
+$('btnPiper').onclick=()=>{$('pipPage').hidden=false;pipPageRender();};
+$('pipClose').onclick=()=>{$('pipPage').hidden=true;};
+pipRefresh().then(v=>{if(v.length)loadServerVoices();});
+
+/* ---------- SING ALONG: upload a music clip, the characters perform to it ---------- */
+Object.assign(ALIAS,{hyped:'happy',pumped:'happy',ecstatic:'laugh',impressed:'shocked',amazed:'shocked',intense:'angry',fierce:'angry'});
+const MOODS={
+  hyped:{l:'🔥 Hyped',emo:'happy',dance:'dance',bounce:30,sway:0.07,sq:0.09,open:1.2,fx:'spark',ring:1},
+  intense:{l:'😤 Intense',emo:'angry',dance:'dance',bounce:14,sway:0.04,lean:0.12,shake:2.4,open:1.25,fx:'flame',aura:1},
+  impressed:{l:'🤩 Extremely impressed',emo:'shocked',dance:null,bounce:7,sway:0.03,nod:1,open:0.9,fx:'star'},
+  ecstatic:{l:'😄 So happy',emo:'laugh',dance:'jump',bounce:34,sway:0.08,sq:0.1,open:1.15,fx:'heart'},
+  happy:{l:'😊 Happy',emo:'happy',dance:'dance',bounce:18,sway:0.06,sq:0.06,open:1,fx:'note'},
+  emotional:{l:'😢 Emotional',emo:'sad',dance:null,bounce:3,sway:0.07,open:0.8,fx:'note'},
+  chill:{l:'😎 Chill',emo:'happy',dance:null,bounce:6,sway:0.05,open:0.8,fx:'note'}
+};
+const MOOD_ALIAS={'so happy':'ecstatic','sohappy':'ecstatic','joyful':'ecstatic','overjoyed':'ecstatic','excited':'hyped','pumped':'hyped','energetic':'hyped','amazed':'impressed','extremely impressed':'impressed','wow':'impressed','awed':'impressed','fierce':'intense','passionate':'intense','focused':'intense','serious':'intense','sad':'emotional','moved':'emotional','relaxed':'chill','cool':'chill','calm':'chill'};
+const moodKey=t=>{t=String(t||'').toLowerCase().trim();return MOODS[t]?t:(MOOD_ALIAS[t]||'hyped');};
+const musTime=v=>{if(v==null||v==='')return 0;v=String(v).trim().toLowerCase().replace(/s$/,'');const m=v.match(/^(\d+):(\d{1,2}(?:\.\d+)?)$/);if(m)return +m[1]*60+ +m[2];const n=parseFloat(v);return isFinite(n)&&n>=0?n:0;};
+const musFmt=t=>{t=Math.max(0,Math.round(t));return Math.floor(t/60)+':'+String(t%60).padStart(2,'0');};
+/* storage: its own small database so nothing else is touched */
+let musDbp=null;
+const musDb=()=>musDbp||(musDbp=new Promise((res,rej)=>{
+  if(!window.indexedDB)return rej(new Error('no indexedDB'));
+  const r=indexedDB.open('toontalk-music',1);
+  r.onupgradeneeded=()=>{r.result.createObjectStore('clips',{keyPath:'id'});};
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);
+}));
+const musTx=(mode,fn)=>musDb().then(d=>new Promise((res,rej)=>{const t=d.transaction('clips',mode),o=fn(t.objectStore('clips'));t.oncomplete=()=>res(o&&'result' in o?o.result:undefined);t.onerror=t.onabort=()=>rej(t.error);}));
+const musAll=()=>musTx('readonly',s=>s.getAll());
+const musPut=o=>musTx('readwrite',s=>{s.put(o);});
+const musDel=id=>musTx('readwrite',s=>{s.delete(id);});
+/* analysis: loudness of the voice band and the bass, vowel colour, beat pulses and tempo, 50 times a second */
+function musAnalyze(buf){
+  const sr=buf.sampleRate,hop=0.02,hs=Math.max(1,Math.round(sr*hop)),N=Math.floor(buf.length/hs);
+  const ch=[];for(let c=0;c<buf.numberOfChannels;c++)ch.push(buf.getChannelData(c));
+  const aL=1-Math.exp(-2*Math.PI*200/sr),aH=1-Math.exp(-2*Math.PI*3500/sr);
+  const bass=new Float32Array(N),mid=new Float32Array(N),zc=new Float32Array(N);
+  let lo=0,hi=0,prev=0;
+  for(let i=0;i<N;i++){
+    let eb=0,em=0,z=0;
+    for(let j=0;j<hs;j++){
+      const k=i*hs+j;let x=0;for(let c=0;c<ch.length;c++)x+=ch[c][k];x/=ch.length;
+      lo+=aL*(x-lo);hi+=aH*(x-hi);const m=hi-lo;
+      eb+=lo*lo;em+=m*m;if((m>0)!==(prev>0))z++;prev=m;
+    }
+    bass[i]=Math.sqrt(eb/hs);mid[i]=Math.sqrt(em/hs);zc[i]=z/2/hop;
+  }
+  const norm=a=>{const s=Float32Array.from(a).sort(),p=s[Math.floor(s.length*0.95)]||1e-6;for(let i=0;i<a.length;i++)a[i]=Math.min(1,a[i]/p);};
+  norm(bass);norm(mid);
+  const e=new Float32Array(N),flux=new Float32Array(N);
+  for(let i=0;i<N;i++)e[i]=0.7*bass[i]+0.5*mid[i];
+  let fs=0,fq=0;
+  for(let i=0;i<N;i++){let m=0,c=0;for(let j=Math.max(0,i-6);j<i;j++){m+=e[j];c++;}m=c?m/c:0;flux[i]=Math.max(0,e[i]-m);fs+=flux[i];fq+=flux[i]*flux[i];}
+  const mean=fs/Math.max(1,N),sd=Math.sqrt(Math.max(0,fq/Math.max(1,N)-mean*mean)),thr=mean+1.1*sd;
+  const ons=[];let last=-9;
+  for(let i=1;i<N-1;i++){if(flux[i]>thr&&flux[i]>=flux[i-1]&&flux[i]>=flux[i+1]&&(i-last)*hop>=0.18){ons.push({i,w:Math.min(1,0.55+flux[i]*1.5)});last=i;}}
+  const pulse=new Float32Array(N);
+  ons.forEach(o=>{for(let j=0;j<35&&o.i+j<N;j++){const v=o.w*Math.exp(-j*hop/0.11);if(v>pulse[o.i+j])pulse[o.i+j]=v;}});
+  // tempo: which spacing between beats repeats most
+  let best=0,bl=25;const f0=flux.reduce((a,b)=>a+b*b,0)||1;
+  for(let L=15;L<=50;L++){let s=0;for(let i=L;i<N;i++)s+=flux[i]*flux[i-L];s/=f0;if(s>best){best=s;bl=L;}}
+  const period=best>0.04?bl*hop:0.5;
+  let cr=0,ci=0;ons.forEach(o=>{const a=2*Math.PI*o.i*hop/period;cr+=o.w*Math.cos(a);ci+=o.w*Math.sin(a);});
+  return {hop,n:N,bass,mid,zc,pulse,period,phase:Math.atan2(ci,cr),bpm:Math.round(60/period),onsets:ons.length,dur:buf.duration};
+}
+const MUSBUF={}; // decoded clips by id
+async function musLoad(rec){
+  if(MUSBUF[rec.id])return MUSBUF[rec.id];
+  ensureAudio();
+  const buf=await actx.decodeAudioData(await rec.blob.arrayBuffer());
+  return (MUSBUF[rec.id]={buf,an:musAnalyze(buf)});
+}
+async function prepareClips(){
+  const ms=segs.filter(s=>s.type==='music');if(!ms.length)return;
+  let all=[];try{all=await musAll();}catch(e){}
+  const miss=[];
+  for(const s of ms){
+    const rec=all.find(r=>r.name.toLowerCase()===String(s.clip).toLowerCase());
+    if(!rec){s.missing=true;s.dur=0.3;if(!miss.includes(s.clip))miss.push(s.clip);continue;}
+    try{const c=await musLoad(rec);s.buf=c.buf;s.an=c.an;}catch(e){s.missing=true;s.dur=0.3;if(!miss.includes(s.clip))miss.push(s.clip);continue;}
+    s.from=Math.min(s.from||0,Math.max(0,s.buf.duration-1));
+    s.dur=Math.max(1,Math.min(s.len||s.buf.duration,s.buf.duration-s.from));
+  }
+  if(miss.length)$('status').textContent='Music clip not found on this device: '+miss.join(', ')+'. Open 🎤 Sing along to upload it again.';
+}
+function musParse(str){
+  const o={type:'music',clip:'',singers:null,mood:'hyped',from:0,len:0,dur:30};
+  const parts=str.split(';').map(x=>x.trim()).filter(Boolean);
+  parts.forEach((p,k)=>{
+    const m=p.match(/^([a-z ]{2,12}?)\s*:\s*(.+)$/i);
+    if(!m){if(!o.clip)o.clip=p;return;}
+    const key=m[1].toLowerCase().trim(),v=m[2].trim();
+    if(key==='who'||key==='singers'||key==='sing'){
+      if(/^(everyone|everybody|all|all of them|together)$/i.test(v))o.singers=null;
+      else o.singers=v.split(/\s*(?:&|\+|,|\band\b)\s*/i).map(x=>x.trim()).filter(Boolean).map(findChar).filter(Boolean);
+    }else if(key==='mood'||key==='feel')o.mood=moodKey(v);
+    else if(key==='from'||key==='start')o.from=musTime(v);
+    else if(key==='length'||key==='for'||key==='len')o.len=musTime(v);
+    else if(key==='clip'||key==='name'||key==='music')o.clip=v;
+  });
+  o.dur=o.len||30;
+  return o;
+}
+function musStart(s,now){
+  if(s.missing||!s.buf||!actx)return;
+  const singers=(s.singers&&s.singers.length?s.singers:order.slice()).filter(n=>chars[n]);
+  s.sing2=singers;
+  const g=actx.createGain(),at=actx.currentTime+0.05;
+  g.gain.setValueAtTime(1,at);g.gain.setValueAtTime(1,at+Math.max(0,s.dur-0.35));g.gain.linearRampToValueAtTime(0,at+s.dur);
+  const src=actx.createBufferSource();src.buffer=s.buf;src.connect(g);g.connect(actx.destination);g.connect(dest);
+  src.onended=()=>{s.ended=true;};
+  src.start(at,s.from,s.dur);s.aStart=at;s.src=src;s.started=true;s.endAt=now+(s.dur+0.05)*1000;
+  const M=MOODS[s.mood]||MOODS.hyped;
+  singers.forEach(n=>{const S=stState(n);initActor(n,S);if(M.dance&&S.on)S.act={kind:M.dance,t0:now,until:now+s.dur*1000+300,loop:false};});
+  s.singStop=()=>{try{g.gain.cancelScheduledValues(actx.currentTime);g.gain.setTargetAtTime(0,actx.currentTime,0.04);setTimeout(()=>{try{src.stop();}catch(e){}},300);}catch(e){}};
+}
+let MUSP=[],MUSLAST=0;
+function musState(s,now){
+  if(!s.an)return null;
+  const a=s.an,ct=actx.currentTime-s.aStart-(actx.outputLatency||0)+0.02;
+  const live=ct>=0&&ct<=s.dur;
+  const t=Math.max(0,ct)+s.from,i=Math.min(a.n-1,Math.floor(t/a.hop));
+  return {s,a,i,t,live,mood:MOODS[s.mood]||MOODS.hyped,pulse:live?a.pulse[i]:0,bass:live?a.bass[i]:0,sway:Math.sin(Math.PI*t/a.period-a.phase/2)};
+}
+const musStep=(x,lo,hi)=>{const k=Math.min(1,Math.max(0,(x-lo)/(hi-lo)));return k*k*(3-2*k);};
+function musMouth(MU,k){
+  if(!MU.live)return null;
+  const a=MU.a,j=Math.min(a.n-1,MU.i+(k%3)),mid=a.mid[j],z=a.zc[j];
+  const open=musStep(mid,0.07,0.55)*MU.mood.open;
+  if(open<0.08)return {sh:0,open:0};
+  return {sh:z<800?4:z<1800?1:z<2800?2:3,open:Math.min(1,open)};
+}
+function musDraw(n,MU,xs,sc,tt,now){
+  const S=ST[n],c=chars[n],M=MU.mood,k=MU.s.sing2.indexOf(n),isS=k>=0;
+  const amp=isS?1:0.35;
+  let emo=isS?M.emo:'happy',talk=false;
+  const MM=MOUTHS[n]||(MOUTHS[n]={});
+  if(isS){const mt=musMouth(MU,k);MM.tgt=mt;talk=!!(mt&&mt.open>0);}else MM.tgt=null;
+  if(!S||S.x==null||!S.on){drawActor(n,c.i,xs,sc,talk,emo,isS,tt,now);return;}
+  const scc=S.sc||sc||0.6,gy=BASE_Y+204*scc+(S.dy||0),x=S.x;
+  const ph=isS?k*0.7:2.1;
+  const sw=MU.live?Math.sin(Math.PI*MU.t/MU.a.period-MU.a.phase/2+ph):0;
+  const p=MU.pulse*amp,b=(M.bounce||0)*scc*p*(isS?1:0.5);
+  ctx.save();
+  ctx.translate(x,gy);
+  ctx.rotate(sw*(M.sway||0.04)*amp+(M.lean?M.lean*MU.pulse*(S.face||1)*amp:0)+(M.nod?Math.sin(tt*2.2+ph)*0.025:0));
+  const q=(M.sq||0.05)*p;ctx.scale(1-q*0.6,1+q);
+  const jx=M.shake?Math.sin(tt*70+ph)*M.shake*MU.pulse*amp:0;
+  ctx.translate(-x+jx,-gy-b);
+  drawActor(n,c.i,xs,sc,talk,emo,isS,tt,now);
+  ctx.restore();
+  if(isS)musSpawn(n,MU,x,BASE_Y+(S.dy||0)-104*scc-b,scc,now);
+}
+function musSpawn(n,MU,x,hy,sc,now){
+  const M=MU.mood,S=ST[n];if(!MU.live)return;
+  S.mpP=S.mpP||0;
+  const edge=MU.pulse>0.65&&S.mpP<=0.65;S.mpP=MU.pulse;
+  if(MUSP.length>160)return;
+  const add=(g,col,r,vx,vy,life,sz)=>MUSP.push({g,col,x:x+(Math.random()-0.5)*r*2,y:hy+(Math.random()-0.5)*r,vx,vy,life,t0:now,sz:sz*sc/0.6});
+  if(edge){
+    const f=M.fx;
+    const cnt=f==='spark'||f==='heart'?3:2;
+    for(let q=0;q<cnt;q++){
+      const sd=(Math.random()-0.5)*2;
+      if(f==='spark')add('spark',['#ffd43b','#ff922b','#fff'][q%3],46,sd*60,-70-Math.random()*50,0.7,13);
+      else if(f==='flame')add('flame',['#ff6b00','#ffd43b','#e03131'][q%3],40,sd*35,-90-Math.random()*40,0.6,17);
+      else if(f==='star')add('star',['#ffd43b','#fff','#74c0fc'][q%3],54,sd*55,-55-Math.random()*40,0.9,13);
+      else if(f==='heart')add('heart',['#ff6b81','#ff8787','#f783ac'][q%3],46,sd*50,-60-Math.random()*45,1,15);
+      else add('note','#fff',40,sd*40,-60-Math.random()*30,1,16);
+    }
+    if(f!=='note'&&Math.random()<0.6)add('note','#fff',40,(Math.random()-0.5)*60,-65,1.1,15);
+    if(M.fx==='flame')add('drop','#74c0fc',60,(Math.random()<0.5?-1:1)*45,-20,0.7,9);
+  }
+}
+function musParticles(now){
+  const dt=Math.min(0.05,(now-(MUSLAST||now))/1000);MUSLAST=now;
+  for(let i=MUSP.length-1;i>=0;i--){const p=MUSP[i],a=(now-p.t0)/1000;if(a>p.life){MUSP.splice(i,1);continue;}
+    p.x+=p.vx*dt;p.y+=p.vy*dt;if(p.g==='drop')p.vy+=260*dt;else p.vy*=0.985;
+    const al=a<0.12?a/0.12:Math.max(0,1-(a-p.life*0.55)/(p.life*0.45));
+    ctx.save();ctx.globalAlpha=Math.max(0,Math.min(1,al));ctx.translate(p.x,p.y);ctx.fillStyle=p.col;ctx.strokeStyle='#0006';ctx.lineWidth=1.5;const z=p.sz;
+    if(p.g==='note'){ctx.font='bold '+Math.round(z*1.6)+'px system-ui,Arial';ctx.textAlign='center';ctx.shadowColor='#0008';ctx.shadowBlur=4;ctx.fillText(Math.random()<2?'♪':'♫',0,0);}
+    else if(p.g==='heart'){ctx.beginPath();ctx.moveTo(0,z*0.35);ctx.bezierCurveTo(-z*1.1,-z*0.5,-z*0.4,-z*1.1,0,-z*0.4);ctx.bezierCurveTo(z*0.4,-z*1.1,z*1.1,-z*0.5,0,z*0.35);ctx.fill();ctx.stroke();}
+    else if(p.g==='flame'){ctx.beginPath();ctx.moveTo(0,-z*1.3);ctx.bezierCurveTo(z*0.9,-z*0.3,z*0.8,z*0.8,0,z*0.9);ctx.bezierCurveTo(-z*0.8,z*0.8,-z*0.9,-z*0.3,0,-z*1.3);ctx.fill();}
+    else if(p.g==='drop'){ctx.beginPath();ctx.moveTo(0,-z);ctx.bezierCurveTo(z*0.8,-z*0.1,z*0.7,z*0.8,0,z*0.8);ctx.bezierCurveTo(-z*0.7,z*0.8,-z*0.8,-z*0.1,0,-z);ctx.fill();}
+    else{const pts=p.g==='star'?5:4,o=z,inn=p.g==='star'?z*0.45:z*0.28;ctx.rotate(a*(p.g==='star'?2:0));ctx.beginPath();for(let q=0;q<pts*2;q++){const r=q%2?inn:o,an=-Math.PI/2+q*Math.PI/pts;ctx.lineTo(Math.cos(an)*r,Math.sin(an)*r);}ctx.closePath();ctx.fill();if(p.g==='star')ctx.stroke();}
+    ctx.restore();}
+}
+function musLabel(s,now){
+  const a=Math.min(1,(now-s.t0)/400);
+  ctx.save();ctx.globalAlpha=a*0.9;ctx.font='bold 22px system-ui,Arial';ctx.textAlign='center';
+  const t='♪ '+(s.clip||'music')+' ♪',w=ctx.measureText(t).width+34;
+  ctx.fillStyle='#000a';ctx.beginPath();ctx.roundRect(W/2-w/2,40,w,40,20);ctx.fill();ctx.fillStyle='#ffd43b';ctx.fillText(t,W/2,68);ctx.restore();
+}
+/* ---------- the Sing along page ---------- */
+let musTarget=null,musSel=null,musCast=[],musMsg='';
+function musRender(){
+  const root=$('musBody');root.innerHTML='';const E=lsEl;
+  root.appendChild(E('div',{className:'hint',innerHTML:'Upload a song or beat. Your characters then <b>sing along to it</b>: their mouths follow the sound, their bodies bounce on the beat, and the mood changes their face and effects. The characters move to the clip; they do not copy the singer\'s own voice. <b>Only use music you made or have the right to use</b>: TikTok and YouTube can mute or block copyrighted songs.'}));
+  const up=E('input',{type:'file',accept:'audio/*,.mp3,.m4a,.wav,.ogg,.aac',style:'display:none'});
+  const ub=E('button',{textContent:'⬆ Upload a music clip',style:'background:#ffd43b'});ub.onclick=()=>up.click();
+  up.onchange=async()=>{
+    const f=up.files[0];up.value='';if(!f)return;
+    $('musMsg').textContent='Reading “'+f.name+'”...';
+    try{
+      const rec={id:'m'+Date.now().toString(36),name:f.name.replace(/\.[a-z0-9]+$/i,'').replace(/[;:\[\]]/g,'').slice(0,40)||'Clip',blob:f,type:f.type,created:Date.now()};
+      const c=await musLoad(rec);rec.dur=c.buf.duration;rec.bpm=c.an.bpm;
+      await musPut(rec);musSel=rec.id;$('musMsg').textContent='Saved on this device: “'+rec.name+'” ('+musFmt(rec.dur)+', about '+rec.bpm+' beats per minute).';musRender();
+    }catch(e){$('musMsg').textContent='Could not read that file. Try an MP3, M4A or WAV.';}
+  };
+  root.appendChild(E('div',{className:'mu-row'},[ub,up]));
+  const list=E('div',{className:'mu-list'});root.appendChild(list);
+  musAll().then(all=>{
+    all.sort((a,b)=>b.created-a.created);
+    if(!all.length)list.appendChild(E('div',{className:'hint',textContent:'No clips yet. Clips stay on this device (they are not included in Backup all).'}));
+    if(!musSel&&all.length)musSel=all[0].id;
+    all.forEach(r=>{
+      const row=E('div',{className:'mu-clip'+(r.id===musSel?' on':'')});
+      const nm=E('button',{className:'mu-name',textContent:'♪ '+r.name+'  ·  '+musFmt(r.dur||0)+(r.bpm?'  ·  ~'+r.bpm+' bpm':'')});nm.onclick=()=>{musSel=r.id;musRender();};
+      const pb=E('button',{textContent:'▶',title:'Listen',style:'background:#69db7c'});
+      pb.onclick=async()=>{try{const c=await musLoad(r);ensureAudio();await actx.resume();if(window._musPrev){try{window._musPrev.stop();}catch(e){}}const s=actx.createBufferSource();s.buffer=c.buf;s.connect(actx.destination);s.start(0,0,Math.min(20,c.buf.duration));window._musPrev=s;}catch(e){}};
+      const db=E('button',{textContent:'🗑',title:'Delete the clip',style:'background:#ff8787'});
+      db.onclick=async()=>{if(!confirm('Delete “'+r.name+'” from this device?'))return;await musDel(r.id);delete MUSBUF[r.id];if(musSel===r.id)musSel=null;musRender();};
+      row.append(nm,pb,db);list.appendChild(row);
+    });
+    const sel=all.find(r=>r.id===musSel);
+    root.appendChild(E('div',{className:'mu-form'},musForm(sel)));
+  }).catch(()=>{list.appendChild(E('div',{className:'hint',textContent:'This browser cannot store clips (storage blocked).'}));});
+}
+function musForm(sel){
+  const E=lsEl,out=[];
+  if(!sel){out.push(E('div',{className:'hint',textContent:'Pick or upload a clip, then choose who sings and the mood.'}));return out;}
+  out.push(E('b',{textContent:'Who sings “'+sel.name+'”?'}));
+  const known=[...new Set([...Object.keys(cfg||{}),...(order||[])])];
+  const chips=E('div',{className:'mv-chips'});
+  known.forEach(n=>{const b=E('button',{className:'mv-chip'+(musCast.includes(n)?' on':''),textContent:n});b.onclick=()=>{const k=musCast.indexOf(n);if(k>=0)musCast.splice(k,1);else musCast.push(n);musRender();};chips.appendChild(b);});
+  const all=E('button',{className:'mv-chip'+(!musCast.length?' on':''),textContent:'Everyone'});all.onclick=()=>{musCast=[];musRender();};chips.appendChild(all);
+  out.push(chips);
+  out.push(E('label',{textContent:'Mood'}));
+  const mood=E('select',{id:'musMood'});Object.keys(MOODS).forEach(k=>mood.appendChild(E('option',{value:k,textContent:MOODS[k].l})));out.push(mood);
+  const t=E('div',{className:'mu-row'});
+  const f=E('input',{type:'text',id:'musFrom',value:'0:00',placeholder:'Start 0:00'}),l=E('input',{type:'text',id:'musLen',value:musFmt(Math.min(sel.dur||30,30)),placeholder:'Length 0:30'});
+  t.append(E('div',{},[E('label',{textContent:'Start at'}),f]),E('div',{},[E('label',{textContent:'Play for'}),l]));out.push(t);
+  const go=E('div',{className:'mu-row'});
+  const mk=()=>'[music: '+sel.name+'; who: '+(musCast.length?musCast.join(', '):'everyone')+'; mood: '+$('musMood').value+'; from: '+$('musFrom').value+'; length: '+$('musLen').value+']';
+  const ins=E('button',{textContent:musTarget==null?'＋ Put it in my script':'＋ Put it in scene '+(musTarget+1),style:'background:#69db7c'});
+  ins.onclick=()=>{
+    const line=mk();
+    if(musTarget==null){const sc=$('script');sc.value=(sc.value.trim()?sc.value.replace(/\s+$/,'')+'\n':'')+line;sc.dispatchEvent(new Event('input'));$('musMsg').textContent='Added to your Write script. Close this page and press Play.';}
+    else{const s=MOV.scenes[musTarget];if(s){s.script=(s.script.trim()?s.script.replace(/\s+$/,'')+'\n':'')+line;movSave();$('musMsg').textContent='Added to scene '+(musTarget+1)+'.';}}
+  };
+  const pre=E('button',{textContent:'▶ Try it now',style:'background:#74c0fc'});
+  pre.onclick=()=>{
+    const line=mk();
+    $('musPage').hidden=true;
+    const names=musCast.length?musCast.slice():(order.length?order.slice():['Kato','Nakato']);
+    MOVIE_OVR={script:'[scene: stadium]\n'+names.map((n,i)=>'['+n+' enters '+(i%2?'right':'left')+']').join('\n')+'\n'+line,title:'',outro:''};MOVIE_FILE='sing along';
+    start(false);
+  };
+  go.append(ins,pre);out.push(go);
+  return out;
+}
+function musOpen(target){musTarget=target==null?null:target;musMsg='';$('musMsg').textContent='';musRender();$('musPage').hidden=false;}
+$('btnSing').onclick=()=>{movClear();musOpen(null);};
+$('musClose').onclick=()=>{$('musPage').hidden=true;};
+
 
 build();
 loadVoices();
