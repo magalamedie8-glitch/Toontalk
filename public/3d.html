@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ToonTalk 3D (prototype)</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;background:#12121a;color:#eee;display:flex;gap:20px;padding:16px;flex-wrap:wrap;justify-content:center;align-items:flex-start}
+  .panel{width:380px;max-width:100%;display:flex;flex-direction:column;gap:8px}
+  h1{margin:0;font-size:20px;color:#ffd43b}
+  h1 small{font-size:12px;color:#aaa;font-weight:400}
+  label{font-size:12px;opacity:.7;margin-bottom:-4px}
+  input[type=text],textarea,select{width:100%;padding:8px;border-radius:8px;border:1px solid #333;background:#1e1e2a;color:#fff;font:inherit}
+  textarea{height:230px;resize:vertical;line-height:1.5;font-size:13px}
+  .row{display:flex;gap:8px;align-items:flex-end}.row>div{flex:1}
+  button{flex:1;padding:11px;border:0;border-radius:8px;font-weight:700;font-size:15px;cursor:pointer;color:#111}
+  #play{background:#69db7c}#rec{background:#ff6b6b}#stop{background:#adb5bd}
+  .stage{display:flex;flex-direction:column;align-items:center;gap:8px}
+  canvas#out{height:min(88vh,900px);max-width:100%;aspect-ratio:9/16;border-radius:14px;background:#000;box-shadow:0 10px 40px #0008;touch-action:none}
+  #status{font-size:13px;opacity:.85;min-height:18px;text-align:center;max-width:380px}
+  .hint{font-size:12px;opacity:.65;line-height:1.55}.hint b{color:#ffd43b}
+  .card{background:#1a1a26;border:1px solid #2c2c3c;border-radius:10px;padding:8px;display:flex;gap:8px;align-items:center;font-size:12px}
+  .card b{min-width:64px}.card select{padding:5px;font-size:12px}.card input[type=color]{width:34px;height:26px;padding:0;border:0;background:none}
+  #cards{display:flex;flex-direction:column;gap:6px}
+  a{color:#74c0fc}
+</style>
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.min.js","three/addons/":"./vendor/three/jsm/"}}</script>
+</head>
+<body>
+<div class="panel">
+  <h1>ToonTalk 3D <small>prototype</small></h1>
+  <div class="row">
+    <div><label>Character style</label><select id="style"><option value="low">Low-poly cartoon</option><option value="real">Realistic</option></select></div>
+    <div><label>Starting scene</label><select id="scene"><option value="room">Living room</option><option value="street">Street</option></select></div>
+  </div>
+  <label>Script</label>
+  <textarea id="script">[scene: room]
+Kato: Mama, who ate my rolex?!
+Mama (angry): Not me. Ask your sister.
+[camera: wide]
+[Nakato walks to center]
+Nakato (shocked): Why are you all looking at me?
+[Kato turns to Nakato]
+Kato (angry): Because there is egg on your face!
+[Nakato runs to door]
+Nakato (laugh): You will never catch me!
+[Kato runs to door]
+[scene: street]
+Mama (happy): Children! Come back for chapati!</textarea>
+  <div class="hint"><b>Moves:</b> [Name walks to left|right|center|door|near|far|Othername] · [Name runs to …] · [Name turns to Other] · [camera: auto|wide|close|two] · [scene: room|street] · [pause: 1]<br>Drag on the video to look around, scroll/pinch to zoom.</div>
+  <div class="row">
+    <div><label>Camera</label><select id="cam"><option value="auto">Auto director</option><option value="wide">Wide</option><option value="close">Close on speaker</option><option value="two">Two-shot</option></select></div>
+    <div><label>Talk speed</label><input type="range" id="speed" min="12" max="40" value="20"></div>
+  </div>
+  <label style="display:flex;gap:6px;align-items:center;opacity:.8"><input type="checkbox" id="tts"> Browser voices while playing (not recorded; recording uses talk blips)</label>
+  <div class="row"><button id="play">▶ Play</button><button id="rec">⏺ Record</button><button id="stop">■ Stop</button></div>
+  <div id="cards"></div>
+  <div class="hint">Prototype: <b>low-poly</b> characters are built in code; <b>realistic</b> ones use free sample models (they nod and gesture while talking but have no mouth shapes yet).<br><a href="./">← Back to ToonTalk 2D</a></div>
+</div>
+<div class="stage"><canvas id="out" width="720" height="1280"></canvas><div id="status"></div></div>
+
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+
+const $=id=>document.getElementById(id);
+const W=720,H=1280;
+const out=$('out'),o2=out.getContext('2d');
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,k)=>a+(b-a)*k;
+const angN=a=>{while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return a;};
+
+/* ---------- renderer / scene ---------- */
+const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(1);renderer.setSize(W,H,false);
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(50,W/H,0.1,200);
+camera.position.set(0,1.7,7);
+let STYLE='low',SCENE='room',world=null,lights=[],pmrem=null,envTex=null;
+
+const SKINS=['#8d5524','#a0673a','#6f4518','#c68642'];
+const OUTFITS=['#4dabf7','#ff6b6b','#ffd43b','#69db7c'];
+const FEMALE=/^(nakato|mama|babirye|namukasa|auntie|aunt|sister|mother|mum|teacher|nabirye|sarah|mary|grace|lydia|nalongo)/i;
+
+function M(color,o={}){
+  return STYLE==='low'?new THREE.MeshLambertMaterial({color,flatShading:true,...o})
+                      :new THREE.MeshStandardMaterial({color,roughness:.72,metalness:0,...o});
+}
+function box(w,h,d,color,x,y,z,parent,o){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),M(color,o));
+  m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;
+}
+function cyl(rt,rb,h,seg,color,x,y,z,parent,o){
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,STYLE==='low'?Math.min(seg,8):Math.max(seg,20)),M(color,o));
+  m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;
+}
+function canvasTex(w,h,draw,rep){
+  const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);
+  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.wrapS=t.wrapT=THREE.RepeatWrapping;
+  if(rep)t.repeat.set(rep[0],rep[1]);t.anisotropy=4;
+  if(STYLE==='low')t.magFilter=THREE.NearestFilter;return t;
+}
+function woodTex(){return canvasTex(512,512,(g,w,h)=>{
+  const cols=['#b07a4a','#a56f40','#b98556','#9f6a3d'];
+  for(let y=0;y<h;y+=64){g.fillStyle=cols[(y/64)%4];g.fillRect(0,y,w,64);
+    for(let k=0;k<60;k++){g.fillStyle='rgba(60,30,10,'+(Math.random()*0.08)+')';g.fillRect(Math.random()*w,y+Math.random()*64,40+Math.random()*80,1);}
+    g.fillStyle='#5b3a1f';g.fillRect(0,y,w,2);const j=(y*7)%w;g.fillRect(j,y,2,64);}
+},[3,3]);}
+function wallTex(c){return canvasTex(256,256,(g,w,h)=>{g.fillStyle=c;g.fillRect(0,0,w,h);
+  if(STYLE==='real')for(let k=0;k<2500;k++){g.fillStyle='rgba(0,0,0,'+Math.random()*0.035+')';g.fillRect(Math.random()*w,Math.random()*h,2,2);}
+},[2,1]);}
+let facadeSeed=7;
+function facadeTex(base,w,h){
+  const t=canvasTex(128,256,(g,cw,ch)=>{
+    g.fillStyle=base;g.fillRect(0,0,cw,ch);let r=facadeSeed++;const rnd=()=>(r=(r*16807)%2147483647)/2147483647;
+    for(let y=14;y<240;y+=36)for(let x=10;x<120;x+=30){g.fillStyle=rnd()>.5?'#ffe9a8':'#8fb4d4';g.fillRect(x,y,18,22);
+      if(STYLE==='real'){g.fillStyle='rgba(0,0,0,.25)';g.fillRect(x,y+20,18,2);}}
+  },[Math.max(1,Math.round(w/2.4)),Math.max(1,Math.round(h/3.2))]);return t;
+}
+function gradientBG(a,b){const t=canvasTex(8,256,(g,w,h)=>{const gr=g.createLinearGradient(0,0,0,h);gr.addColorStop(0,a);gr.addColorStop(1,b);g.fillStyle=gr;g.fillRect(0,0,w,h);});t.wrapS=t.wrapT=THREE.ClampToEdgeWrapping;t.magFilter=THREE.LinearFilter;return t;}
+
+function clearWorld(){
+  if(world){scene.remove(world);world.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>{if(m.map)m.map.dispose();m.dispose();});}});}
+  lights.forEach(l=>scene.remove(l));lights=[];world=null;
+}
+function addLight(l){scene.add(l);lights.push(l);return l;}
+
+/* ---------- spots (where characters can walk) ---------- */
+let SPOTS={};
+function buildWorld(kind){
+  clearWorld();SCENE=kind;world=new THREE.Group();scene.add(world);facadeSeed=7;
+  renderer.toneMapping=STYLE==='real'?THREE.ACESFilmicToneMapping:THREE.NoToneMapping;
+  renderer.toneMappingExposure=1.0;
+  scene.fog=null;scene.environment=null;
+  if(STYLE==='real'){if(!envTex){pmrem=new THREE.PMREMGenerator(renderer);envTex=pmrem.fromScene(new RoomEnvironment(),0.04).texture;}scene.environment=envTex;}
+  const real=STYLE==='real';
+  if(kind==='room'){
+    scene.background=new THREE.Color(real?'#2b2623':'#b8997a');
+    SPOTS={left:[-1.4,0.4],right:[1.4,0.4],center:[0,0.2],near:[0,1.8],far:[0,-1.2],door:[2.2,-2.1],sofa:[-2.1,-1.5]};
+    // floor
+    const fl=new THREE.Mesh(new THREE.PlaneGeometry(7.4,8),real?M('#ffffff',{map:woodTex(),roughness:.55}):M('#e9b77d'));
+    fl.rotation.x=-Math.PI/2;fl.position.set(0,0,0.5);fl.receiveShadow=true;world.add(fl);
+    const wc=real?'#e8dccb':'#ffd9a0';
+    const mk=(w,h,x,y,z,ry)=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),M('#ffffff',{map:wallTex(wc),side:THREE.DoubleSide}));m.position.set(x,y,z);m.rotation.y=ry;m.receiveShadow=true;world.add(m);return m;};
+    mk(7.4,3.4,0,1.7,-3.5,0);mk(8,3.4,-3.7,1.7,0.5,Math.PI/2);mk(8,3.4,3.7,1.7,0.5,-Math.PI/2);
+    const ce=new THREE.Mesh(new THREE.PlaneGeometry(7.4,8),new THREE.MeshBasicMaterial({color:real?'#3a322c':'#b8997a',side:THREE.DoubleSide}));ce.rotation.x=Math.PI/2;ce.position.set(0,3.4,0.5);world.add(ce);
+    box(7.4,0.12,0.06,real?'#f4efe6':'#fff',0,0.06,-3.46,world);
+    box(0.06,0.12,8,real?'#f4efe6':'#fff',-3.66,0.06,0.5,world);box(0.06,0.12,8,real?'#f4efe6':'#fff',3.66,0.06,0.5,world);
+    // window (back wall, left)
+    const wx=-0.9;
+    box(1.9,1.5,0.08,'#f8f8f8',wx,1.8,-3.46,world);
+    const glass=new THREE.Mesh(new THREE.PlaneGeometry(1.7,1.3),new THREE.MeshBasicMaterial({color:real?'#bfe1ff':'#9fd8ff'}));glass.position.set(wx,1.8,-3.4);world.add(glass);
+    box(0.06,1.3,0.05,'#f8f8f8',wx,1.8,-3.38,world);box(1.7,0.06,0.05,'#f8f8f8',wx,1.8,-3.38,world);
+    box(2.2,0.9,0.05,'#d9485a',wx-1.2,1.9,-3.4,world);box(0.5,1.9,0.06,'#d9485a',wx-1.05,1.75,-3.38,world);box(0.5,1.9,0.06,'#d9485a',wx+1.05,1.75,-3.38,world);
+    // door
+    box(1.05,2.25,0.08,'#6d4a2f',2.2,1.125,-3.45,world);
+    box(0.85,2.05,0.04,'#85603f',2.2,1.1,-3.4,world);
+    box(0.09,0.09,0.09,'#e6c14a',1.85,1.05,-3.34,world);
+    // sofa
+    box(2.2,0.45,0.95,'#4c6ef5',-2.1,0.3,-2.7,world);
+    box(2.2,0.75,0.28,'#4263eb',-2.1,0.75,-3.1,world);
+    box(0.28,0.65,0.95,'#4263eb',-3.1,0.5,-2.7,world);box(0.28,0.65,0.95,'#4263eb',-1.1,0.5,-2.7,world);
+    box(0.7,0.12,0.7,'#74c0fc',-2.5,0.58,-2.65,world);box(0.7,0.12,0.7,'#74c0fc',-1.7,0.58,-2.65,world);
+    // coffee table
+    box(1.0,0.06,0.6,'#8d6e63',-2.0,0.42,-1.4,world);
+    [[-.42,-.24],[.42,-.24],[-.42,.24],[.42,.24]].forEach(([a,b])=>box(0.06,0.4,0.06,'#5d4037',-2.0+a,0.2,-1.4+b,world));
+    box(0.18,0.12,0.18,'#fff',-1.8,0.51,-1.4,world);
+    // rug
+    const rug=cyl(1.7,1.7,0.02,32,'#e8590c',0,0.015,0.3,world);rug.castShadow=false;
+    cyl(1.3,1.3,0.025,32,'#ffd43b',0,0.02,0.3,world).castShadow=false;
+    // lamp
+    cyl(0.03,0.03,1.5,8,'#444',3.0,0.75,-2.9,world);cyl(0.2,0.3,0.38,12,'#fff3bf',3.0,1.6,-2.9,world,{emissive:'#ffcc66',emissiveIntensity:real?0.8:0.4});
+    cyl(0.18,0.18,0.04,12,'#333',3.0,0.02,-2.9,world);
+    // plant
+    cyl(0.2,0.15,0.35,10,'#c2255c',-3.2,0.18,-0.2,world);
+    for(let k=0;k<6;k++){const l=new THREE.Mesh(new THREE.IcosahedronGeometry(0.2,0),M('#2f9e44'));l.position.set(-3.2+Math.sin(k*1.7)*0.14,0.55+k*0.09,-0.2+Math.cos(k*2.1)*0.12);l.castShadow=true;world.add(l);}
+    // pictures
+    box(0.7,0.5,0.04,'#5c3d2e',1.0,2.1,-3.44,world);box(0.6,0.4,0.03,'#a5d8ff',1.0,2.1,-3.41,world);
+    box(0.4,0.55,0.04,'#5c3d2e',-3.66,1.9,-0.8,world).rotation.y=Math.PI/2;
+    // lights
+    if(real){
+      addLight(new THREE.HemisphereLight('#fff6e8','#6b5846',0.55));
+      const d=addLight(new THREE.DirectionalLight('#fff0d6',2.2));d.position.set(-3,5,5);d.castShadow=true;
+      d.shadow.mapSize.set(2048,2048);Object.assign(d.shadow.camera,{left:-6,right:6,top:6,bottom:-6,near:1,far:20});d.shadow.bias=-0.0005;d.shadow.normalBias=0.02;
+      const p=addLight(new THREE.PointLight('#ffc27a',9,9,1.6));p.position.set(2.8,1.6,-2.4);
+      const g=addLight(new THREE.PointLight('#cfe8ff',6,8,1.6));g.position.set(-0.9,1.8,-2.6);
+    }else{
+      addLight(new THREE.AmbientLight('#ffffff',0.85));
+      const d=addLight(new THREE.DirectionalLight('#ffffff',0.9));d.position.set(-2,6,5);
+    }
+  }else{ // street
+    const sky=real?['#7fb6e8','#dfeefc']:['#74c0fc','#d0ebff'];
+    scene.background=gradientBG(sky[0],sky[1]);
+    if(real)scene.fog=new THREE.Fog('#dfeefc',16,48);
+    SPOTS={left:[-1.5,0.2],right:[1.5,0.2],center:[0,0],near:[0,1.6],far:[0,-1.2],door:[2.0,-3.3],car:[-2.3,2.2]};
+    const road=new THREE.Mesh(new THREE.PlaneGeometry(60,10),M(real?'#3f4348':'#5c636a'));road.rotation.x=-Math.PI/2;road.position.set(0,0,5);road.receiveShadow=true;world.add(road);
+    const walk=new THREE.Mesh(new THREE.PlaneGeometry(60,5.4),M(real?'#b9b5ad':'#ced4da'));walk.rotation.x=-Math.PI/2;walk.position.set(0,0.03,-1.7);walk.receiveShadow=true;world.add(walk);
+    box(60,0.12,0.25,real?'#9a968f':'#adb5bd',0,0.06,1.1,world);
+    for(let x=-14;x<=14;x+=3){const m=new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.2),new THREE.MeshBasicMaterial({color:'#ffd43b'}));m.rotation.x=-Math.PI/2;m.position.set(x,0.02,4.6);world.add(m);}
+    // buildings
+    const cols=real?['#8a7f78','#a39485','#6f7a85','#9b8576','#7d8a73']:['#ff8787','#ffd43b','#69db7c','#74c0fc','#da77f2'];
+    let x=-16,i=0;
+    while(x<16){const w=3.4+((i*37)%5)*0.5,h=5+((i*53)%6)*1.4,d=3;
+      const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),M('#ffffff',{map:facadeTex(cols[i%cols.length],w,h)}));
+      m.position.set(x+w/2,h/2,-6.2);m.castShadow=true;m.receiveShadow=true;world.add(m);x+=w+0.05;i++;}
+    // shop at the door spot
+    box(3.2,3.6,1.6,real?'#c9a27a':'#ffa94d',2.0,1.8,-5.0,world);
+    box(0.95,2.3,0.06,'#5c3d2e',2.0,1.15,-4.17,world);box(0.07,0.07,0.07,'#ffd43b',1.7,1.1,-4.12,world);
+    box(1.0,1.0,0.05,'#a5d8ff',0.9,1.7,-4.18,world,{emissive:'#fff3bf',emissiveIntensity:real?0.3:0.1});
+    for(let k=0;k<8;k++)box(0.4,0.08,1.05,k%2?'#fff':'#e03131',0.65+k*0.4,2.95-k*0.0,-3.7,world).rotation.x=0.32;
+    box(2.2,0.4,0.05,'#2b8a3e',2.0,3.4,-4.17,world);
+    // lamp posts
+    [-2.7,3.4].forEach(px=>{cyl(0.05,0.07,3.6,8,'#343a40',px,1.8,-0.2,world);box(0.5,0.06,0.06,'#343a40',px+0.22,3.6,-0.2,world);
+      cyl(0.12,0.12,0.12,8,'#fff3bf',px+0.45,3.52,-0.2,world,{emissive:'#ffe066',emissiveIntensity:.6});});
+    // trees
+    [[-4.0,-0.3],[4.4,-0.6]].forEach(([tx,tz])=>{cyl(0.12,0.16,1.6,8,'#6d4c41',tx,0.8,tz,world);
+      for(let k=0;k<5;k++){const l=new THREE.Mesh(new THREE.IcosahedronGeometry(0.75-k*0.04,real?2:0),M('#2f9e44'));l.position.set(tx+Math.sin(k*2)*0.5,2.0+k*0.35,tz+Math.cos(k*2.6)*0.4);l.castShadow=true;world.add(l);}});
+    // parked car
+    const car=new THREE.Group();car.position.set(-3.0,0,2.8);world.add(car);
+    box(2.6,0.55,1.15,'#e03131',0,0.5,0,car);box(1.3,0.5,1.05,'#c92a2a',-0.1,0.98,0,car);
+    box(1.15,0.38,1.08,'#a5d8ff',-0.1,0.98,0,car,{emissive:'#335577',emissiveIntensity:.2});
+    [[-0.85,0.57],[0.85,0.57],[-0.85,-0.57],[0.85,-0.57]].forEach(([a,b])=>{const w=cyl(0.28,0.28,0.2,12,'#212529',a,0.28,b,car);w.rotation.x=Math.PI/2;});
+    // lights
+    if(real){
+      addLight(new THREE.HemisphereLight('#cfe6ff','#8a7d6d',0.6));
+      const d=addLight(new THREE.DirectionalLight('#fff3dc',2.8));d.position.set(-5,9,6);d.castShadow=true;
+      d.shadow.mapSize.set(2048,2048);Object.assign(d.shadow.camera,{left:-9,right:9,top:9,bottom:-9,near:1,far:30});d.shadow.bias=-0.0005;d.shadow.normalBias=0.03;
+    }else{
+      addLight(new THREE.AmbientLight('#ffffff',0.9));
+      const d=addLight(new THREE.DirectionalLight('#ffffff',0.85));d.position.set(-3,8,6);
+    }
+  }
+}
+
+/* ---------- actors ---------- */
+const EMOS={neutral:0,happy:1,angry:2,sad:3,shocked:4,laugh:5,scared:6,sleepy:7,love:1};
+const EALIAS={mad:'angry',cry:'sad',crying:'sad',surprised:'shocked',shock:'shocked',laughing:'laugh',lol:'laugh',afraid:'scared',tired:'sleepy',joy:'happy',excited:'happy'};
+function spotXZ(s){return {x:s[0],z:s[1]};}
+
+class Actor{
+  constructor(name,i,look){
+    this.name=name;this.i=i;this.look=look;this.root=new THREE.Group();
+    this.yaw=0;this.tyaw=0;this.dest=null;this.run=false;this.talk=0;this.talking=false;this.emo='neutral';
+    this.t=Math.random()*10;this.ph=0;this.w=0;this.r=0;this.arrived=false;
+  }
+  get pos(){return this.root.position;}
+  faceTo(p){const dx=p.x-this.pos.x,dz=p.z-this.pos.z;if(Math.abs(dx)+Math.abs(dz)>1e-3)this.tyaw=Math.atan2(dx,dz);}
+  moveTo(x,z,run){this.dest={x,z};this.run=run;this.arrived=false;}
+  step(dt){
+    this.t+=dt;let mv=0;
+    if(this.dest){
+      const dx=this.dest.x-this.pos.x,dz=this.dest.z-this.pos.z,d=Math.hypot(dx,dz);
+      if(d<0.06){this.dest=null;this.arrived=true;}
+      else{const sp=this.run?3.3:1.3,k=Math.min(d,sp*dt);this.pos.x+=dx/d*k;this.pos.z+=dz/d*k;this.tyaw=Math.atan2(dx,dz);mv=this.run?2:1;}
+    }
+    this.yaw+=angN(this.tyaw-this.yaw)*(1-Math.exp(-dt*(mv?12:6)));
+    this.root.rotation.y=this.yaw;
+    this.w=lerp(this.w,mv===1?1:0,1-Math.exp(-dt*9));this.r=lerp(this.r,mv===2?1:0,1-Math.exp(-dt*9));
+    this.ph+=dt*(mv===2?11:mv===1?6.5:0);
+    this.talk=lerp(this.talk,this.talking?1:0,1-Math.exp(-dt*12));
+    this.pose(dt,mv);
+  }
+}
+
+/* low-poly procedural person */
+class LowPoly extends Actor{
+  constructor(name,i,look,skin,outfit){
+    super(name,i,look);
+    const R=this.root,fem=look==='woman';
+    const pants=fem?outfit:'#2b3a67',hair='#1b1b1b';
+    this.hips=new THREE.Group();this.hips.position.y=0.95;R.add(this.hips);
+    box(0.4,0.22,0.25,pants,0,0,0,this.hips);
+    this.spine=new THREE.Group();this.spine.position.y=0.08;this.hips.add(this.spine);
+    box(0.44,0.58,0.26,outfit,0,0.3,0,this.spine);
+    if(fem){const sk=cyl(0.22,0.36,0.55,8,outfit,0,-0.22,0,this.hips);}
+    this.head=new THREE.Group();this.head.position.set(0,0.74,0);this.spine.add(this.head);
+    box(0.09,0.1,0.09,skin,0,-0.1,0,this.head);
+    const hd=new THREE.Mesh(new THREE.IcosahedronGeometry(0.2,1),M(skin));hd.scale.set(1,1.1,1);hd.position.y=0.12;hd.castShadow=true;this.head.add(hd);
+    const hr=new THREE.Mesh(new THREE.IcosahedronGeometry(0.215,1),M(hair));hr.scale.set(1,0.75,1.02);hr.position.set(0,0.2,-0.02);hr.castShadow=true;this.head.add(hr);
+    if(fem){box(0.36,0.4,0.12,hair,0,0.0,-0.17,this.head);const pt=new THREE.Mesh(new THREE.IcosahedronGeometry(0.1,0),M(hair));pt.position.set(0,0.1,-0.3);this.head.add(pt);}
+    for(const sx of[-1,1]){
+      box(0.07,0.07,0.04,'#ffffff',sx*0.075,0.15,0.205,this.head);box(0.035,0.04,0.03,'#111',sx*0.075,0.15,0.225,this.head);
+      const e=box(0.04,0.1,0.04,skin,sx*0.21,0.1,0,this.head);
+    }
+    this.brows=[];for(const sx of[-1,1]){const b=box(0.1,0.025,0.03,hair,sx*0.075,0.235,0.208,this.head);this.brows.push(b);}
+    box(0.05,0.07,0.05,skin,0,0.08,0.215,this.head);
+    this.mouth=box(0.1,0.05,0.03,'#5a1111',0,-0.0,0.205,this.head);
+    this.mouthY=0.0;
+    const arm=(sx)=>{const sh=new THREE.Group();sh.position.set(sx*0.3,0.52,0);this.spine.add(sh);
+      box(0.11,0.3,0.11,outfit,0,-0.14,0,sh);const el=new THREE.Group();el.position.y=-0.3;sh.add(el);
+      box(0.09,0.28,0.09,skin,0,-0.14,0,el);box(0.1,0.1,0.1,skin,0,-0.3,0,el);return {sh,el};};
+    this.aL=arm(-1);this.aR=arm(1);
+    const leg=(sx)=>{const th=new THREE.Group();th.position.set(sx*0.11,0,0);this.hips.add(th);
+      box(0.15,0.46,0.15,pants,0,-0.23,0,th);const kn=new THREE.Group();kn.position.y=-0.46;th.add(kn);
+      box(0.13,0.42,0.13,fem?skin:pants,0,-0.21,0,kn);box(0.15,0.07,0.26,'#222',0,-0.455,0.05,kn);return {th,kn};};
+    this.lL=leg(-1);this.lR=leg(1);
+  }
+  pose(dt){
+    const {w,r,ph,talk,t}=this,mvw=w+r,e=EMOS[this.emo];
+    const s=Math.sin(ph)*(0.55*w+0.75*r);
+    this.lL.th.rotation.x=-s;this.lR.th.rotation.x=s;
+    this.lL.kn.rotation.x=Math.max(0,Math.cos(ph))*(0.8*w+1.1*r)*(s<0?0.2:1)+0.03;
+    this.lR.kn.rotation.x=Math.max(0,-Math.cos(ph))*(0.8*w+1.1*r)*(s>0?0.2:1)+0.03;
+    this.aL.sh.rotation.x=s*1.0;this.aR.sh.rotation.x=-s*1.0;
+    this.aL.el.rotation.x=-(0.12+0.9*r)*(mvw>0.1?1:0.3);this.aR.el.rotation.x=-(0.12+0.9*r)*(mvw>0.1?1:0.3);
+    this.aL.sh.rotation.z=0.06;this.aR.sh.rotation.z=-0.06;
+    this.hips.position.y=0.95+Math.abs(Math.sin(ph))*0.05*mvw+Math.sin(t*2)*0.006;
+    this.spine.rotation.x=0.28*r+0.05*w;this.spine.rotation.z=Math.sin(ph)*0.04*mvw;
+    this.hips.rotation.y=Math.sin(ph)*0.12*mvw;
+    // talking
+    const idle=1-clamp(mvw,0,1);
+    const open=talk*(0.35+0.65*Math.abs(Math.sin(t*15)))*(0.6+0.4*Math.abs(Math.sin(t*7.3)));
+    let mw=1,mh=0.35+open*1.6,my=0;
+    if(e===1){mw=1.35;mh=0.4+open*1.4;}else if(e===5){mw=1.4;mh=0.7+open*1.5;}
+    else if(e===4||e===6){mw=0.7;mh=0.9+open*1.5;}else if(e===3){mw=0.8;mh=0.25+open;my=-0.012;}
+    else if(e===2){mw=1.1;mh=0.3+open*1.2;}
+    this.mouth.scale.set(mw,mh,1);this.mouth.position.y=my-0.0-open*0.012;
+    const bz=[0,0.1,-0.35,0.3,0,0,0.25,-0.15][e]||0,by=[0,0.01,-0.015,0.01,0.03,0.0,0.03,-0.02][e]||0;
+    this.brows[0].rotation.z=-bz;this.brows[1].rotation.z=bz;this.brows.forEach(b=>b.position.y=0.235+by);
+    this.head.rotation.x=talk*Math.sin(t*5)*0.06+(e===3?0.25:e===7?0.2:0)+(e===5?Math.sin(t*14)*0.08:0)*talk;
+    this.head.rotation.y=talk*Math.sin(t*2.3)*0.09;this.head.rotation.z=e===3?0.08:0;
+    if(e===2||e===6){this.root.position.x+=Math.sin(t*50)*0.0012;}
+    if(talk>0.02&&idle>0.5){
+      const g=0.55+0.35*Math.sin(t*3.1);
+      this.aR.sh.rotation.x=-talk*(0.9+g*0.4);this.aR.el.rotation.x=-talk*(1.0+0.4*Math.sin(t*4.4));
+      if(e===2||e===4||e===5){this.aL.sh.rotation.x=-talk*(0.7+0.3*Math.sin(t*3.7+1));this.aL.el.rotation.x=-talk*0.9;}
+    }
+  }
+}
+
+/* realistic glTF person (Mixamo rig) */
+const loader=new GLTFLoader();
+const MODELS={};
+async function loadModel(key){
+  if(MODELS[key])return MODELS[key];
+  const url={man:'./models3d/Soldier.glb',woman:'./models3d/Michelle.glb'}[key];
+  MODELS[key]=await loader.loadAsync(url);return MODELS[key];
+}
+let CLIPS=null;
+async function loadClips(){
+  if(CLIPS)return CLIPS;const g=await loadModel('man');CLIPS={};
+  g.animations.forEach(a=>{CLIPS[a.name.toLowerCase()]=a;});return CLIPS;
+}
+class Real extends Actor{
+  constructor(name,i,look,gltf,clips){
+    super(name,i,look);
+    this.model=SkeletonUtils.clone(gltf.scene);
+    // measure height from the skeleton (skinned-mesh boxes are unreliable), then scale to ~1.76 m and stand on the floor
+    this.model.updateMatrixWorld(true);
+    let lo=1e9,hi=-1e9,top=null;const v=new THREE.Vector3();
+    this.model.traverse(o=>{if(o.isBone){o.getWorldPosition(v);lo=Math.min(lo,v.y);hi=Math.max(hi,v.y);if(/HeadTop_End$/.test(o.name))top=v.y;}});
+    const h=((top!==null?top:hi*1.08)-lo)||1;const sc=1.76/h;
+    this.model.scale.multiplyScalar(sc);this.model.position.y=-lo*sc;
+    this.model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;o.frustumCulled=false;if(o.material&&o.material.envMapIntensity!==undefined)o.material.envMapIntensity=0.8;}});
+    this.root.add(this.model);
+    this.mixer=new THREE.AnimationMixer(this.model);
+    // Soldier clips drive both rigs. The two hips have different rest rotations, so convert the hips track (otherwise she flips upside down).
+    const hipsOf=root=>{let f=null;root.traverse(o=>{if(o.isBone&&/Hips$/.test(o.name))f=o;});return f;};
+    const hS=hipsOf(MODELS.man.scene),hM=hipsOf(this.model);
+    const qRest=hS&&hM?new THREE.Quaternion().copy(hS.quaternion).invert().premultiply(hM.quaternion):null;
+    const prep=c=>{const k=c.clone();
+      if(look==='woman'){
+        k.tracks=k.tracks.filter(t=>!t.name.endsWith('.position'));
+        k.tracks.forEach(t=>{if(/Hips\.quaternion$/.test(t.name)&&hS&&hM){
+          const v=t.values,q=new THREE.Quaternion(),rs=hS.quaternion.clone().invert();
+          for(let i=0;i<v.length;i+=4){q.set(v[i],v[i+1],v[i+2],v[i+3]);q.multiply(rs);q.premultiply(new THREE.Quaternion().identity());q.multiply(hM.quaternion);
+            v[i]=q.x;v[i+1]=q.y;v[i+2]=q.z;v[i+3]=q.w;}}});
+      }return k;};
+    this.act={};
+    ['idle','walk','run'].forEach(n=>{const c=clips[n];if(!c)return;const a=this.mixer.clipAction(prep(c));a.play();a.setEffectiveWeight(n==='idle'?1:0);this.act[n]=a;});
+    const find=n=>{let f=null;this.model.traverse(o=>{if(o.isBone&&o.name.endsWith(n))f=o;});return f;};
+    this.bHead=find('Head');this.bSpine=find('Spine2')||find('Spine1');this.bRA=find('RightArm');this.bRF=find('RightForeArm');this.bLA=find('LeftArm');this.bLF=find('LeftForeArm');
+    this.act.idle.time=Math.random()*3;
+  }
+  pose(dt,mv){
+    const {w,r,talk,t}=this,e=EMOS[this.emo];
+    const idleW=clamp(1-w-r,0,1);
+    this.act.idle.setEffectiveWeight(idleW);this.act.walk&&this.act.walk.setEffectiveWeight(w);this.act.run&&this.act.run.setEffectiveWeight(r);
+    this.mixer.update(dt);
+    if(this.bHead){
+      this.bHead.rotateX(talk*Math.sin(t*5)*0.07+(e===3?0.3:e===7?0.25:0)*1);
+      this.bHead.rotateY(talk*Math.sin(t*2.3)*0.12);
+      if(e===5)this.bHead.rotateX(Math.sin(t*14)*0.07*talk);
+    }
+    if(this.bSpine&&(e===2||e===4)&&talk>0.1)this.bSpine.rotateX(-0.08*talk);
+    if(talk>0.02&&idleW>0.5&&this.bRA&&this.bRF){
+      const g=Math.sin(t*3.1);
+      this.bRA.rotateX(-talk*(0.9+0.3*g)*0.9);this.bRA.rotateZ(talk*0.25);
+      this.bRF.rotateY(talk*(0.9+0.4*Math.sin(t*4.4)));
+    }
+  }
+}
+
+/* ---------- audio ---------- */
+let actx=null,dest=null;
+function ensureAudio(){if(actx)return;actx=new (window.AudioContext||window.webkitAudioContext)();dest=actx.createMediaStreamDestination();}
+function blip(freq){
+  if(!actx)return;const o=actx.createOscillator(),g=actx.createGain();
+  o.type='triangle';o.frequency.value=freq*(0.9+Math.random()*0.35);
+  g.gain.setValueAtTime(0.09,actx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+0.07);
+  o.connect(g);g.connect(actx.destination);g.connect(dest);o.start();o.stop(actx.currentTime+0.08);
+}
+const BLIPF=[210,330,170,270];
+
+/* ---------- script ---------- */
+const cap=s=>s.trim().replace(/\b\w/g,c=>c.toUpperCase());
+function parse(text){
+  const segs=[],names=[];
+  const add=n=>{if(!names.includes(n)&&names.length<4)names.push(n);};
+  for(const raw of text.split('\n')){
+    const l=raw.trim();if(!l)continue;let m;
+    if((m=l.match(/^\[\s*scene\s*:\s*(\w+)\s*\]$/i))){segs.push({t:'scene',v:m[1].toLowerCase()});continue;}
+    if((m=l.match(/^\[\s*camera\s*:\s*(\w+)\s*\]$/i))){segs.push({t:'cam',v:m[1].toLowerCase()});continue;}
+    if((m=l.match(/^\[\s*pause\s*:?\s*([\d.]+)\s*\]$/i))){segs.push({t:'pause',d:+m[1]});continue;}
+    if((m=l.match(/^\[\s*([A-Za-z][\w ]*?)\s+(walks?|runs?|goes|moves)\s+to\s+(?:the\s+)?([\w]+)\s*\]$/i))){const n=cap(m[1]);add(n);segs.push({t:'move',who:n,run:/^run/i.test(m[2]),to:m[3].toLowerCase()});continue;}
+    if((m=l.match(/^\[\s*([A-Za-z][\w ]*?)\s+turns?\s+(?:to|towards)\s+(\w+)\s*\]$/i))){const n=cap(m[1]);add(n);segs.push({t:'turn',who:n,to:m[2].toLowerCase()});continue;}
+    m=l.match(/^([^:()\[\]]{1,20}?)\s*(?:\(\s*([A-Za-z]+)\s*\))?\s*:\s*(.+)$/);
+    if(m){const n=cap(m[1]);add(n);let e=(m[2]||'neutral').toLowerCase();e=EALIAS[e]||e;if(!(e in EMOS))e='neutral';segs.push({t:'line',who:n,emo:e,text:m[3].trim()});}
+  }
+  return {segs,names};
+}
+
+/* ---------- state ---------- */
+let actors={},order=[],cfg={},segs=[],idx=-1,seg=null,segT=0,playing=false,camMode='auto',lineNo=0;
+let fade=0,titleText='',lastSpeaker=null,blipT=0,recording=false,recorder=null,chunks=[];
+let userYaw=0,userZoom=1,userPitch=0;
+const listenerOf={};
+
+function defaultLook(n,i){return FEMALE.test(n)?'woman':'man';}
+function ensureCfg(n,i){if(!cfg[n])cfg[n]={look:defaultLook(n,i),skin:SKINS[i%4],outfit:OUTFITS[i%4]};}
+function renderCards(){
+  const box=$('cards');box.innerHTML='';
+  order.forEach((n,i)=>{ensureCfg(n,i);const f=cfg[n];const c=document.createElement('div');c.className='card';
+    c.innerHTML='<b></b>';c.firstChild.textContent=n;
+    const s=document.createElement('select');[['man','Man / boy'],['woman','Woman / girl']].forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;s.appendChild(o);});s.value=f.look;
+    s.onchange=()=>{f.look=s.value;if(!playing)rebuildActors();};c.appendChild(s);
+    if(STYLE==='low'){for(const k of['skin','outfit']){const ci=document.createElement('input');ci.type='color';ci.value=f[k];ci.oninput=()=>{f[k]=ci.value;};ci.onchange=()=>{if(!playing)rebuildActors();};c.appendChild(ci);}}
+    box.appendChild(c);});
+}
+function startPositions(n){
+  const sp=SPOTS;
+  return {1:[[0,0.3]],2:[sp.left,sp.right],3:[sp.left,sp.right,[0,-1.0]],4:[[-1.5,0.5],[1.5,0.5],[-0.6,-0.9],[0.9,-1.2]]}[n]||[[0,0]];
+}
+async function rebuildActors(){
+  Object.values(actors).forEach(a=>scene.remove(a.root));actors={};
+  const {names}=parse($('script').value);order=names.slice();
+  const clips=STYLE==='real'?await loadClips():null;
+  const pos=startPositions(order.length);
+  for(let i=0;i<order.length;i++){
+    const n=order[i];ensureCfg(n,i);const f=cfg[n];let a;
+    if(STYLE==='real')a=new Real(n,i,f.look,await loadModel(f.look),clips);
+    else a=new LowPoly(n,i,f.look,f.skin,f.outfit);
+    a.pos.set(pos[i][0],0,pos[i][1]);a.yaw=a.tyaw=0;scene.add(a.root);actors[n]=a;
+  }
+  // face each other
+  order.forEach((n,i)=>{const o=actors[order[(i+1)%order.length]];if(o!==actors[n]){actors[n].faceTo(o.pos);actors[n].yaw=actors[n].tyaw;}else{actors[n].yaw=actors[n].tyaw=0;}});
+  renderCards();
+}
+async function setStyleScene(){
+  STYLE=$('style').value;buildWorld($('scene').value);await rebuildActors();
+}
+function resolveTo(a,key){
+  const k=key.toLowerCase();
+  if(SPOTS[k])return spotXZ(SPOTS[k]);
+  const o=order.find(n=>n.toLowerCase()===k);
+  if(o&&actors[o]&&actors[o]!==a){const p=actors[o].pos;const dx=a.pos.x-p.x,dz=a.pos.z-p.z,d=Math.hypot(dx,dz)||1;return {x:p.x+dx/d*1.0,z:p.z+dz/d*1.0};}
+  return null;
+}
+function nearestOther(a){let b=null,bd=1e9;order.forEach(n=>{const o=actors[n];if(o===a)return;const d=Math.hypot(o.pos.x-a.pos.x,o.pos.z-a.pos.z);if(d<bd){bd=d;b=o;}});return b;}
+
+/* ---------- sequence ---------- */
+function enter(i){
+  idx=i;seg=segs[i];segT=0;if(!seg)return;
+  if(seg.t==='scene'){fade=1;seg.done=false;}
+  else if(seg.t==='line'){
+    const a=actors[seg.who];if(!a){seg.dur=0.1;return;}
+    let b=lastSpeaker&&lastSpeaker!==a?lastSpeaker:nearestOther(a);
+    if(b){a.faceTo(b.pos);b.faceTo(a.pos);listenerOf[a.name]=b.name;}
+    a.emo=seg.emo;a.talking=true;lastSpeaker=a;lineNo++;
+    seg.dur=seg.text.length/(+$('speed').value)+0.9;seg.shown=0;seg.vdone=true;
+    if($('tts').checked&&!recording&&'speechSynthesis' in window){
+      seg.vdone=false;const u=new SpeechSynthesisUtterance(seg.text);
+      u.pitch=a.look==='woman'?1.3:0.9;u.onend=u.onerror=()=>{seg.vdone=true;};speechSynthesis.speak(u);
+      seg.maxT=seg.dur*3+3;
+    }
+  }else if(seg.t==='move'){
+    const a=actors[seg.who];if(!a){seg.dur=0;return;}
+    const p=resolveTo(a,seg.to);if(p){a.moveTo(p.x,p.z,seg.run);seg.mover=a;}
+  }else if(seg.t==='turn'){
+    const a=actors[seg.who];const p=resolveTo(a,seg.to)||(SPOTS[seg.to]?spotXZ(SPOTS[seg.to]):null);
+    if(a&&p){a.faceTo(actors[cap(seg.to)]?actors[cap(seg.to)].pos:p);}
+    seg.dur=0.7;
+  }else if(seg.t==='cam'){camMode=seg.v;seg.dur=0.05;}
+  else if(seg.t==='pause')seg.dur=seg.d;
+}
+function segDone(){
+  if(!seg)return true;
+  if(seg.t==='scene'){return segT>0.5;}
+  if(seg.t==='line'){if(segT<seg.dur)return false;if(!seg.vdone&&segT<seg.maxT)return false;return true;}
+  if(seg.t==='move'){return !seg.mover||seg.mover.arrived||segT>12;}
+  return segT>=(seg.dur||0);
+}
+function leave(){
+  if(seg&&seg.t==='line'){const a=actors[seg.who];if(a)a.talking=false;}
+  if(seg&&seg.t==='move'&&seg.mover){const o=nearestOther(seg.mover);if(o)seg.mover.faceTo(o.pos);}
+}
+function advance(){
+  leave();
+  if(idx+1>=segs.length){finish();return;}
+  enter(idx+1);
+  if(seg.t==='scene'){const key=seg.v==='street'?'street':'room';buildWorld(key);const pos=startPositions(order.length);order.forEach((n,i)=>{const a=actors[n];a.dest=null;a.pos.set(pos[i][0],0,pos[i][1]);});}
+}
+async function start(withRec){
+  const p=parse($('script').value);segs=p.segs;
+  if(!segs.some(s=>s.t==='line')){$('status').textContent='Write at least one line like  Kato: hello';return;}
+  stopAll(true);ensureAudio();await actx.resume();
+  $('status').textContent=STYLE==='real'?'Loading realistic models…':'';
+  await setStyleScene();
+  lastSpeaker=null;lineNo=0;camMode=$('cam').value;playing=true;idx=-1;seg=null;
+  if(withRec)startRecording();
+  titleText='';advance();
+  $('status').textContent=withRec?'Recording…':'';
+}
+function startRecording(){
+  const stream=out.captureStream(30);dest.stream.getAudioTracks().forEach(t=>stream.addTrack(t));
+  const mime=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m));
+  recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6000000});chunks=[];
+  recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+  recorder.onstop=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(chunks,{type:'video/webm'}));a.download='toontalk-3d-'+STYLE+'.webm';a.click();$('status').textContent='Saved toontalk-3d-'+STYLE+'.webm to your Downloads.';window.__lastRec=chunks.reduce((s,c)=>s+c.size,0);};
+  recorder.start();recording=true;
+}
+function finish(){
+  playing=false;order.forEach(n=>{actors[n].talking=false;});
+  if('speechSynthesis' in window)speechSynthesis.cancel();
+  if(recording&&recorder&&recorder.state!=='inactive'){setTimeout(()=>{recorder.stop();recording=false;},600);}else $('status').textContent='Done.';
+}
+function stopAll(silent){
+  playing=false;if('speechSynthesis' in window)speechSynthesis.cancel();
+  Object.values(actors).forEach(a=>{a.talking=false;a.dest=null;});
+  if(recording&&recorder&&recorder.state!=='inactive'){if(silent)recorder.onstop=null;recorder.stop();recording=false;}
+}
+
+/* ---------- camera director ---------- */
+const camPos=new THREE.Vector3(0,1.9,8.4),camTgt=new THREE.Vector3(0,1.05,0);
+function directorShot(){
+  const spk=(seg&&seg.t==='line')?actors[seg.who]:null;
+  let mode=camMode;
+  if(mode==='auto'){
+    if(spk)mode=(lineNo%3===0)?'two':'close';
+    else if(seg&&seg.t==='move'&&seg.mover)mode='follow';else mode='wide';
+  }
+  const P=new THREE.Vector3(),T=new THREE.Vector3();
+  if(mode==='wide'||(!spk&&mode!=='follow')){P.set(0,1.9,8.4);T.set(0,1.05,0);}
+  else if(mode==='follow'&&seg&&seg.mover){const m=seg.mover.pos;T.set(m.x*0.8,1.05,m.z);P.set(m.x*0.5,1.8,m.z+6.4);}
+  else if(mode==='close'&&spk){
+    T.set(spk.pos.x,1.42,spk.pos.z);const a=spk.yaw+0.55;P.set(T.x+Math.sin(a)*3.1,1.65,T.z+Math.cos(a)*3.1);
+  }else{ // two shot
+    const b=actors[listenerOf[spk?spk.name:'']]||(spk&&nearestOther(spk));
+    if(!spk||!b){P.set(0,1.9,8.4);T.set(0,1.05,0);}
+    else{const mx=(spk.pos.x+b.pos.x)/2,mz=(spk.pos.z+b.pos.z)/2,sep=Math.hypot(spk.pos.x-b.pos.x,spk.pos.z-b.pos.z);
+      let nx=-(b.pos.z-spk.pos.z),nz=(b.pos.x-spk.pos.x);const l=Math.hypot(nx,nz)||1;nx/=l;nz/=l;if(nz<0){nx=-nx;nz=-nz;}
+      const d=Math.max(4.8,sep*1.9+3.4);T.set(mx,1.25,mz);P.set(mx+nx*d,1.75,mz+nz*d);}
+  }
+  // user orbit offset
+  const off=P.clone().sub(T);const r=off.length()*userZoom;
+  const yaw=Math.atan2(off.x,off.z)+userYaw,pitch=clamp(Math.asin(off.y/off.length())+userPitch,-0.2,0.9);
+  P.set(T.x+Math.sin(yaw)*Math.cos(pitch)*r,T.y+Math.sin(pitch)*r,T.z+Math.cos(yaw)*Math.cos(pitch)*r);
+  return {P,T};
+}
+
+/* ---------- subtitles + overlay ---------- */
+function wrap(text,font,maxW){o2.font=font;const ws=text.split(' '),ls=[];let c='';ws.forEach(w=>{const t=c?c+' '+w:w;if(o2.measureText(t).width>maxW&&c){ls.push(c);c=w;}else c=t;});if(c)ls.push(c);return ls;}
+function drawSub(name,text,emo){
+  const font='bold 44px system-ui,Arial';const ls=wrap(text,font,600);const lh=56,h=ls.length*lh+30,y=H-250-h;
+  o2.fillStyle='rgba(0,0,0,.62)';o2.beginPath();o2.roundRect(40,y,640,h,26);o2.fill();
+  o2.font='bold 26px system-ui,Arial';const nw=o2.measureText(name).width+34;
+  o2.fillStyle='#ffd43b';o2.beginPath();o2.roundRect(60,y-22,nw,40,20);o2.fill();o2.fillStyle='#111';o2.textAlign='left';o2.fillText(name,77,y+7);
+  o2.font=font;o2.fillStyle='#fff';ls.forEach((l,i)=>o2.fillText(l,60,y+14+lh*(i+0.8)));
+}
+
+/* ---------- main loop ---------- */
+function update(dt){
+  if(playing&&seg){
+    segT+=dt;
+    if(seg.t==='line'&&actors[seg.who]){seg.shown=clamp(Math.floor(segT*(+$('speed').value)),0,seg.text.length);
+      blipT-=dt;if(blipT<=0&&segT<seg.dur-0.7){blipT=0.085;if(Math.random()<0.8)blip(BLIPF[actors[seg.who].i%4]*(actors[seg.who].look==='woman'?1.5:1));}}
+    if(segDone())advance();
+  }
+  order.forEach(n=>actors[n]&&actors[n].step(dt));
+  if(fade>0)fade=Math.max(0,fade-dt*2.2);
+  const {P,T}=playing?directorShot():(()=>{const P=new THREE.Vector3(0,1.9,8.4),T=new THREE.Vector3(0,1.05,0);const off=P.clone().sub(T),r=off.length()*userZoom,yaw=userYaw,pitch=clamp(Math.asin(off.y/off.length())+userPitch,-0.2,0.9);P.set(Math.sin(yaw)*Math.cos(pitch)*r,1+Math.sin(pitch)*r,Math.cos(yaw)*Math.cos(pitch)*r);return {P,T};})();
+  const k=1-Math.exp(-dt*(playing?3.2:8));camPos.lerp(P,k);camTgt.lerp(T,k);
+  camera.position.copy(camPos);camera.lookAt(camTgt);
+}
+function draw(){
+  renderer.render(scene,camera);
+  o2.drawImage(renderer.domElement,0,0,W,H);
+  if(playing&&seg&&seg.t==='line'&&actors[seg.who])drawSub(seg.who,seg.text.slice(0,seg.shown),seg.emo);
+  if(fade>0){o2.fillStyle='rgba(0,0,0,'+fade+')';o2.fillRect(0,0,W,H);}
+}
+let last=performance.now(),manual=false;
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(!manual){update(dt);draw();}
+  requestAnimationFrame(frame);
+}
+// test hook: run the story at a fixed step without waiting for slow software rendering
+function simulate(sec,every){manual=true;const n=Math.round(sec/0.04);for(let i=0;i<n;i++){update(0.04);if(every&&i%every===0)draw();}draw();}
+
+/* ---------- input ---------- */
+let drag=null;
+out.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY};out.setPointerCapture(e.pointerId);});
+out.addEventListener('pointermove',e=>{if(!drag)return;userYaw-=(e.clientX-drag.x)*0.006;userPitch+=(e.clientY-drag.y)*0.004;drag={x:e.clientX,y:e.clientY};});
+out.addEventListener('pointerup',()=>{drag=null;});
+out.addEventListener('wheel',e=>{e.preventDefault();userZoom=clamp(userZoom*(1+e.deltaY*0.001),0.4,1.8);},{passive:false});
+$('play').onclick=()=>start(false);$('rec').onclick=()=>start(true);
+$('stop').onclick=()=>{stopAll(false);$('status').textContent='Stopped.';};
+$('style').onchange=async()=>{if(playing)return;await setStyleScene();};
+$('scene').onchange=async()=>{if(playing)return;await setStyleScene();};
+$('script').addEventListener('change',()=>{if(!playing)rebuildActors();});
+window.TT={simulate,start,setStyleScene,get actors(){return actors;},get seg(){return seg;},get playing(){return playing;},get recSize(){return window.__lastRec;},THREE,scene,camera,renderer};
+
+setStyleScene().then(()=>{$('status').textContent='';});
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

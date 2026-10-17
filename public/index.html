@@ -64,6 +64,12 @@
   #pipBody{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
   .pip-list{display:flex;flex-direction:column;gap:8px}.pip-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:#1e1e2c;border:2px solid #2c2c3c;border-radius:10px;padding:8px}
   .pip-info{flex:1 1 200px;min-width:0}.pip-bar{display:flex;gap:6px;align-items:center;flex:0 1 auto}.pip-bar button{flex:0 0 auto;padding:9px 12px}.pip-row>button{flex:1 1 100%}
+  #artEd[hidden]{display:none}
+  #artEd{position:fixed;inset:0;background:#12121a;z-index:44;overflow:auto;padding:16px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+  #artEdBody{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+  .art-pick{display:flex;gap:6px;flex-wrap:wrap}.art-pick button{flex:1 1 90px;background:#2a2a3a;color:#ddd;border:2px solid transparent;padding:9px 4px}.art-pick button.on{border-color:#ffd43b;color:#fff}
+  .art-prevs{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start}.art-prevs canvas{max-width:100%;height:auto;background:#222;border-radius:10px;touch-action:manipulation}#artPrev{flex:1 1 280px;cursor:crosshair}
+  .art-grid{display:grid;grid-template-columns:120px 1fr;gap:6px 10px;align-items:center}.art-grid label{font-size:12px;opacity:.75;margin:0}
   #movPage[hidden]{display:none}
   #movPage{position:fixed;inset:0;background:#12121a;z-index:41;overflow:auto;padding:16px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}
   .mv-top{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.mv-top input{flex:1 1 220px}
@@ -308,6 +314,32 @@ Mama (love): Okay okay, I will make you both chapati.</textarea>
 <div id="pipPage" hidden>
   <div class="phead"><h2>🗣 Offline voices</h2><button id="pipClose">✕ Close</button></div>
   <div id="pipBody"></div>
+</div>
+<div id="artEd" hidden>
+  <div class="phead"><h2 id="artEdTitle">🖼 Picture</h2><button id="artClose">✕ Close</button></div>
+  <div id="artEdBody">
+    <div class="hint"><b>How it works:</b> make your character with any AI image tool (ask for <i>“full body cartoon character, facing the front, plain white background”</i>), save the picture, and add it here. ToonTalk makes it talk, blink, walk, bounce, dance and show moods. Use pictures you made or may use.</div>
+    <input type="file" id="artFile" accept="image/*" hidden>
+    <button id="artChoose" style="background:#ffd43b" onclick="document.getElementById('artFile').click()">⬆ Choose a picture</button>
+    <div class="hint" id="artEdMsg"></div>
+    <div id="artTools" hidden>
+      <div class="hint"><b>1.</b> Pick what to place, then tap that spot on the picture.</div>
+      <div id="artPick" class="art-pick"><button data-k="mouth">👄 Mouth</button><button data-k="eye1">👁 Left eye</button><button data-k="eye2">👁 Right eye</button><button data-k="split">✂ Head line</button></div>
+      <div class="art-prevs"><canvas id="artPrev" width="360" height="440"></canvas><div><div class="hint">Live test</div><canvas id="artLive" width="220" height="300"></canvas></div></div>
+      <div class="art-grid">
+        <label>Mouth size</label><input type="range" id="artSize" min="0.05" max="0.5" step="0.005">
+        <label>Eye size</label><input type="range" id="artEye" min="0.015" max="0.12" step="0.0025">
+        <label>Picture height</label><input type="range" id="artH" min="0.6" max="1.6" step="0.05">
+      </div>
+      <label class="hint" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="artSplit" style="width:auto"> Move the head separately from the body (set the head line above)</label>
+      <label class="hint" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="artSide" style="width:auto"> My picture is a side view (turn it around when walking left)</label>
+      <div class="hint"><b>2.</b> Picture has a plain background? Remove it. Lower the number if parts of the character disappear.</div>
+      <div class="art-grid"><label>Strength</label><input type="range" id="artTol" min="8" max="90" value="40"></div>
+      <label class="hint" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="artEvery" style="width:auto"> Also remove the background inside gaps (arms, between legs)</label>
+      <div class="mu-row"><button id="artBg" style="background:#74c0fc">Remove plain background</button><button id="artUndo" style="background:#adb5bd">Undo</button></div>
+    </div>
+    <button id="artSave" style="background:#69db7c" disabled>✓ Use this picture for the character</button>
+  </div>
 </div>
 <div id="voiceLab" hidden><div class="vl-w">
   <div style="display:flex;gap:8px;align-items:center"><b style="font-size:18px;flex:1">🎧 Voice lab</b><button id="vlClose" style="flex:0 0 auto;background:#adb5bd">✕ Close</button></div>
@@ -844,6 +876,7 @@ function renderCards(force){
     card.appendChild(figTiles(f));
     if((f.style||'cartoon')==='real')realCardRows(card,f,n);
     if((f.style||'cartoon')==='animal')animalCardRows(card,f,n);
+    if((f.style||'cartoon')==='art')artCardRows(card,f,n);
     const kb=document.createElement('button');kb.textContent='🎭 '+kindLabel(kindOf(f))+' ▾';kb.onclick=()=>kindOpen(n);
     card.appendChild(row('Character',kb));
     if(!kindOf(f))card.appendChild(row('Look',mkSel(LOOKS,f.look,v=>f.look=v)));
@@ -5474,6 +5507,256 @@ $('movAddCur').onclick=()=>{
 $('movPlay').onclick=()=>movPlay(null,false);
 $('movRec').onclick=()=>movPlay(null,true);
 movLoad();
+/* ---------- MY PICTURE: bring your own character art (from any AI image tool) and ToonTalk animates it ---------- */
+let artDbp=null;
+const artDb=()=>artDbp||(artDbp=new Promise((res,rej)=>{
+  if(!window.indexedDB)return rej(new Error('no indexedDB'));
+  const r=indexedDB.open('toontalk-art',1);
+  r.onupgradeneeded=()=>{r.result.createObjectStore('imgs',{keyPath:'id'});};
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);
+}));
+const artTx=(mode,fn)=>artDb().then(d=>new Promise((res,rej)=>{const t=d.transaction('imgs',mode),o=fn(t.objectStore('imgs'));t.oncomplete=()=>res(o&&'result' in o?o.result:undefined);t.onerror=t.onabort=()=>rej(t.error);}));
+const artGet=id=>artTx('readonly',s=>s.get(id));
+const artPut=(id,blob)=>artTx('readwrite',s=>{s.put({id,blob});});
+const ARTIMG={};
+function artRequest(id){ // the picture of a character, loaded once from this device
+  const o=ARTIMG[id];if(o)return o.c?o:null;
+  ARTIMG[id]={loading:true};
+  (async()=>{
+    try{
+      const rec=await artGet(id);if(!rec){ARTIMG[id]={missing:true};return;}
+      const bm=await createImageBitmap(rec.blob);
+      const c=document.createElement('canvas');c.width=bm.width;c.height=bm.height;c.getContext('2d').drawImage(bm,0,0);
+      ARTIMG[id]={c,w:c.width,h:c.height};
+    }catch(e){ARTIMG[id]={missing:true};}
+  })();
+  return null;
+}
+const ART_M=[[.8,.07],[.7,.55],[.85,.38],[.7,.25],[.55,.62],[.4,.4],[.8,.16]];
+const artDef=(I)=>{const tall=I&&I.h/I.w>1.25;return tall?{mx:.5,my:.205,ms:.16,ex1:.42,ey1:.14,ex2:.58,ey2:.14,es:.035,sp:.34,h:1,side:false,lid:'#c68642'}:{mx:.5,my:.7,ms:.22,ex1:.36,ey1:.42,ex2:.64,ey2:.42,es:.06,sp:0,h:1,side:false,lid:'#c68642'};};
+function artPaint(g,I,A,o){ // draws the picture with its feet at (0,0); o: {H,open,sh,blink,headRot,headDy,fc}
+  const H=o.H,W=H*I.w/I.h,sp=A.sp>0.05?A.sp:0;
+  g.save();
+  if(o.fc<0&&A.side)g.scale(-1,1);
+  const body=()=>{if(sp)g.drawImage(I.c,0,sp*I.h,I.w,(1-sp)*I.h,-W/2,-H+sp*H,W,(1-sp)*H);else g.drawImage(I.c,-W/2,-H,W,H);};
+  const head=()=>{
+    if(sp)g.drawImage(I.c,0,0,I.w,sp*I.h+2,-W/2,-H,W,sp*H+2*H/I.h);
+    const px=a=>-W/2+a*W,py=a=>-H+a*H;
+    // blinking eyelids in the skin colour of the picture
+    if(o.blink>0.04){
+      const r=A.es*W;
+      [[A.ex1,A.ey1],[A.ex2,A.ey2]].forEach(([ex,ey])=>{
+        const cx=px(ex),cy=py(ey);
+        g.fillStyle=A.lid||'#c68642';g.beginPath();g.ellipse(cx,cy,r*1.25,r*1.05*Math.min(1,o.blink),0,0,7);g.fill();
+        g.strokeStyle='#2b1d14';g.lineWidth=Math.max(1.5,r*0.22);g.lineCap='round';g.beginPath();g.arc(cx,cy-r*0.1+r*1.05*Math.min(1,o.blink)*0.6,r*1.05,0.15*Math.PI,0.85*Math.PI);g.stroke();
+      });
+    }
+    // talking mouth
+    if(o.sh>0&&o.open>0.08){
+      const mw=A.ms*W,cx=px(A.mx),cy=py(A.my),m=ART_M[o.sh]||ART_M[1];
+      const rx=mw*0.5*m[0],ry=Math.max(mw*0.05,mw*0.5*m[1]*(0.35+0.85*o.open));
+      g.fillStyle='#4a1515';g.beginPath();g.ellipse(cx,cy+ry*0.15,rx,ry,0,0,7);g.fill();
+      g.save();g.beginPath();g.ellipse(cx,cy+ry*0.15,rx,ry,0,0,7);g.clip();
+      if(o.sh===2||o.sh===3||o.sh===6){g.fillStyle='#f7f2ea';g.fillRect(cx-rx,cy+ry*0.15-ry,rx*2,ry*0.38);}
+      g.fillStyle='#e8798a';g.beginPath();g.ellipse(cx,cy+ry*0.15+ry*0.7,rx*0.65,ry*0.55,0,0,7);g.fill();
+      g.restore();
+      g.strokeStyle='#2b1d14';g.lineWidth=Math.max(1.5,mw*0.035);g.beginPath();g.ellipse(cx,cy+ry*0.15,rx,ry,0,0,7);g.stroke();
+    }
+  };
+  body();
+  if(sp){g.translate(0,-H+sp*H);g.rotate(o.headRot||0);g.translate(0,H-sp*H+(o.headDy||0));head();}
+  else{g.translate(0,o.headDy||0);head();}
+  g.restore();
+}
+function artFx(emo,tt,x,y,r){ // small mood symbols near the head
+  ctx.save();ctx.translate(x,y);ctx.lineCap='round';
+  const bob=Math.sin(tt*4)*3;
+  if(emo==='angry'){ctx.strokeStyle='#e03131';ctx.lineWidth=5;const s=14+Math.sin(tt*12)*2;ctx.translate(r*0.55,-6);ctx.beginPath();ctx.moveTo(-s,-s*0.3);ctx.lineTo(-s*0.3,-s*0.3);ctx.lineTo(-s*0.3,-s);ctx.moveTo(s,-s*0.3);ctx.lineTo(s*0.3,-s*0.3);ctx.lineTo(s*0.3,-s);ctx.moveTo(-s,s*0.3);ctx.lineTo(-s*0.3,s*0.3);ctx.lineTo(-s*0.3,s);ctx.moveTo(s,s*0.3);ctx.lineTo(s*0.3,s*0.3);ctx.lineTo(s*0.3,s);ctx.stroke();}
+  else if(emo==='scared'||emo==='shocked'){ctx.fillStyle='#74c0fc';ctx.strokeStyle='#1c7ed6';ctx.lineWidth=2;ctx.translate(r*0.62,8+bob);ctx.beginPath();ctx.moveTo(0,-12);ctx.bezierCurveTo(10,-2,9,9,0,10);ctx.bezierCurveTo(-9,9,-10,-2,0,-12);ctx.fill();ctx.stroke();
+    if(emo==='shocked'){ctx.translate(-r*1.2,-30);ctx.fillStyle='#ffd43b';ctx.font='bold 38px system-ui';ctx.textAlign='center';ctx.shadowColor='#0008';ctx.shadowBlur=4;ctx.fillText('!',0,0);}}
+  else if(emo==='love'){for(let k=0;k<3;k++){const a=(tt*0.8+k/3)%1;ctx.globalAlpha=1-a;ctx.fillStyle='#ff6b81';const hx=(k-1)*28+Math.sin(tt*3+k)*6,hy=-a*70,z=11;ctx.beginPath();ctx.moveTo(hx,hy+z*0.35);ctx.bezierCurveTo(hx-z*1.1,hy-z*0.5,hx-z*0.4,hy-z*1.1,hx,hy-z*0.4);ctx.bezierCurveTo(hx+z*0.4,hy-z*1.1,hx+z*1.1,hy-z*0.5,hx,hy+z*0.35);ctx.fill();}}
+  else if(emo==='sleepy'){ctx.fillStyle='#fff';ctx.font='bold 26px system-ui';ctx.shadowColor='#0008';ctx.shadowBlur=4;for(let k=0;k<3;k++){const a=(tt*0.6+k/3)%1;ctx.globalAlpha=1-a;ctx.font='bold '+(16+k*6)+'px system-ui';ctx.fillText('z',r*0.5+k*14,-a*60-k*6);}}
+  else if(emo==='sad'){ctx.fillStyle='#74c0fc';const a=(tt*0.9)%1;ctx.globalAlpha=1-a*0.6;ctx.beginPath();ctx.ellipse(-r*0.32,a*60,4,7,0,0,7);ctx.fill();ctx.beginPath();ctx.ellipse(r*0.32,((a+0.5)%1)*60,4,7,0,0,7);ctx.fill();}
+  else if(emo==='happy'||emo==='laugh'){ctx.fillStyle='#ffd43b';for(let k=0;k<2;k++){const a=(tt*1.1+k/2)%1;ctx.globalAlpha=Math.sin(a*Math.PI);const sx=(k?1:-1)*(r*0.7),sy=-a*30-10,z=9;ctx.beginPath();for(let q=0;q<8;q++){const rr=q%2?z*0.3:z,an=-Math.PI/2+q*Math.PI/4;ctx.lineTo(sx+Math.cos(an)*rr,sy+Math.sin(an)*rr);}ctx.closePath();ctx.fill();}}
+  ctx.restore();
+}
+function drawArt(c,x,sc,speaking,emo,isSp,tt,now,S){
+  const f=cfg[c.name],A=f.art||null,fc=S.face||1;
+  const I=A&&A.id?artRequest(A.id):null;
+  const H=330*((A&&A.h)||1);
+  const M=MOUTHS[c.name];
+  // motion from what the character is doing
+  let dy=0,rot=0,hr=0,hdy=0,sx=1,sy=1,dx=0;
+  const sw=sitW(S,now);
+  if(S.moving){const ph=Math.abs(Math.sin(S.travel/14));dy-=ph*(S.run?15:9);rot+=Math.sin(S.travel/14)*(S.run?0.075:0.05);sy*=1+0.025*ph;}
+  else{dy-=Math.sin(tt*2)*1.5;sy*=1+Math.sin(tt*2)*0.006;rot+=Math.sin(tt*1.1)*0.01;}
+  let open=0,sh=0;
+  if(speaking){
+    if(M&&M.tgt){sh=M.tgt.sh;open=M.tgt.sh===0?0:M.tgt.open;}else{open=Math.abs(Math.sin(tt*16));sh=1+Math.floor(Math.abs(Math.sin(tt*5.3))*3);}
+    hr+=Math.sin(tt*7.3)*0.025*Math.max(0.3,open);hdy+=open*2.5;
+  }
+  if(emo==='sad'){hr+=0.07;hdy+=8;}else if(emo==='angry'){hr+=Math.sin(tt*30)*0.012;hdy-=3;}else if(emo==='scared'){dx+=Math.sin(tt*45)*2.5;}else if(emo==='laugh'){dy-=Math.abs(Math.sin(tt*14))*5;hr+=Math.sin(tt*14)*0.03;}else if(emo==='happy'&&speaking){dy-=Math.abs(Math.sin(tt*5))*3;}else if(emo==='sleepy'){hr+=0.06+Math.sin(tt*1.2)*0.02;hdy+=6;}
+  if(S.act){
+    const t=(now-S.act.t0)/1000,k=S.act.kind,dur=Math.max(0.3,(S.act.until-S.act.t0)/1000);
+    if(k==='jump'){dy-=Math.sin(clamp(t/0.65,0,1)*Math.PI)*80;sy*=1+0.06*Math.sin(clamp(t/0.65,0,1)*Math.PI);}
+    else if(k==='dance'||k==='play'){dy-=Math.abs(Math.sin(t*8))*22;rot+=Math.sin(t*4)*0.14;hr+=Math.sin(t*8)*0.07;}
+    else if(k==='bow'){rot+=0.45*Math.sin(clamp(t/dur,0,1)*Math.PI)*fc;}
+    else if(k==='spin'){sx*=Math.cos(t*7);}
+    else if(k==='fall'){rot+=clamp(t/0.35,0,1)*1.45*fc;dy+=clamp(t/0.35,0,1)*40;}
+    else if(k==='crouch'){sy*=0.82;dy+=0;}
+    else if(k==='wave'||k==='raise'||k==='point'||k==='nod'||k==='shrug'||k==='salute'){rot+=Math.sin(t*9)*0.035;hdy-=Math.abs(Math.sin(t*9))*3;}
+    else{dy-=Math.abs(Math.sin(t*7))*18;rot+=Math.sin(t*3.5)*0.05;}
+  }
+  if(sw>0){dy+=40*sw;sy*=1-0.06*sw;}
+  // blinking
+  let blink=0;const bt=((tt*1000+c.i*777)%3600);
+  if(bt<150)blink=Math.sin(bt/150*Math.PI);
+  if(emo==='laugh')blink=1;else if(emo==='sleepy')blink=Math.max(blink,0.7);else if(emo==='happy'&&speaking&&Math.sin(tt*3)>0.92)blink=1;
+  const gy=BASE_Y+206*sc;
+  ctx.save();ctx.translate(x+dx,BASE_Y);ctx.scale(sc,sc);ctx.translate(0,206);
+  const air=clamp(-dy/70,0,1);
+  ctx.fillStyle='#0003';ctx.beginPath();ctx.ellipse(0,2,Math.max(30,H*0.2)*(1-air*0.35),Math.max(9,H*0.04)*(1-air*0.35),0,0,7);ctx.fill();
+  if(emo==='angry'){ctx.fillStyle='rgba(255,0,0,.13)';ctx.beginPath();ctx.ellipse(0,-H*0.5,H*0.32,H*0.55,0,0,7);ctx.fill();}
+  ctx.translate(0,dy);
+  ctx.rotate(rot);ctx.scale(sx,sy);
+  if(!I||!I.c){
+    const miss=A&&A.id&&ARTIMG[A.id]&&ARTIMG[A.id].missing;
+    ctx.strokeStyle='#ffd43b';ctx.lineWidth=4;ctx.setLineDash([14,10]);ctx.fillStyle='rgba(255,255,255,.12)';
+    ctx.beginPath();ctx.roundRect(-H*0.22,-H,H*0.44,H,40);ctx.fill();ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='#fff';ctx.font='bold 26px system-ui';ctx.textAlign='center';ctx.shadowColor='#000a';ctx.shadowBlur=6;
+    ctx.fillText('🖼',0,-H*0.56);ctx.font='bold 17px system-ui';ctx.fillText(miss?'Picture missing':'Add a picture',0,-H*0.56+28);ctx.fillText(miss?'on this device':'on the Characters tab',0,-H*0.56+50);
+  }else{
+    artPaint(ctx,I,A,{H,open,sh,blink,headRot:hr,headDy:hdy,fc});
+    if(!S.fixedPose){for(const p of PR){if(p.held!==c.name)continue;const d=PROPS[p.name];if(!d)continue;ctx.save();ctx.translate((S.face>=0?1:-1)*H*I.w/I.h*0.3,-H*0.36);d.draw();ctx.restore();}}
+  }
+  artFx(emo,tt,0,-H*0.98,(I&&I.c?H*I.w/I.h:H*0.44)*0.3);
+  ctx.restore();
+  HEADY[c.name]=BASE_Y+(206-H*0.98)*sc+dy*sc;
+}
+FIGURES.art={label:'My picture',icon:'🖼',draw:drawArt};
+{const o=document.createElement('option');o.value='art';o.textContent='🖼 My picture';$('figAll').appendChild(o);}
+/* ---------- the picture setup page ---------- */
+let artEdName=null,artEdA=null,artEdC=null,artEdOrig=null,artEdTool='mouth',artEdDirty=false,artEdRaf=0;
+function artSampleLid(){
+  if(!artEdC||!artEdA)return;
+  try{
+    const A=artEdA,w=artEdC.width,h=artEdC.height,g=artEdC.getContext('2d');
+    const pts=[[A.ex1,A.ey1],[A.ex2,A.ey2]];let r=0,gg=0,b=0,n=0;
+    pts.forEach(([ex,ey])=>{const px=Math.round(ex*w),py=Math.round((ey-A.es*1.7*w/h)*h);const d=g.getImageData(Math.max(0,px-3),Math.max(0,py-3),6,6).data;for(let i=0;i<d.length;i+=4){if(d[i+3]>200){r+=d[i];gg+=d[i+1];b+=d[i+2];n++;}}});
+    if(n)A.lid='rgb('+Math.round(r/n)+','+Math.round(gg/n)+','+Math.round(b/n)+')';
+  }catch(e){}
+}
+function artRemoveBg(cv,tol,everywhere){
+  const w=cv.width,h=cv.height,g=cv.getContext('2d'),im=g.getImageData(0,0,w,h),p=im.data;
+  const cs=[[0,0],[w-6,0],[0,h-6],[w-6,h-6]];let R=0,G=0,B=0,N=0;
+  cs.forEach(([x0,y0])=>{for(let y=y0;y<y0+6;y++)for(let x=x0;x<x0+6;x++){const i=(y*w+x)*4;R+=p[i];G+=p[i+1];B+=p[i+2];N++;}});
+  R/=N;G/=N;B/=N;
+  const near=(i,t)=>p[i+3]>0&&Math.hypot(p[i]-R,p[i+1]-G,p[i+2]-B)<t;
+  const seen=new Uint8Array(w*h),st=[];
+  if(everywhere){for(let q=0;q<w*h;q++)if(near(q*4,tol))seen[q]=1;}
+  else{
+    const push=(x,y)=>{const q=y*w+x;if(!seen[q]&&near(q*4,tol)){seen[q]=1;st.push(q);}};
+    for(let x=0;x<w;x++){push(x,0);push(x,h-1);}for(let y=0;y<h;y++){push(0,y);push(w-1,y);}
+    while(st.length){const q=st.pop(),x=q%w,y=(q/w)|0;if(x>0)push(x-1,y);if(x<w-1)push(x+1,y);if(y>0)push(x,y-1);if(y<h-1)push(x,y+1);}
+  }
+  for(let q=0;q<w*h;q++)if(seen[q])p[q*4+3]=0;
+  // soften the edge: pixels touching the removed area that are close to the background colour get half transparent
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const q=y*w+x;if(seen[q])continue;if(seen[q-1]||seen[q+1]||seen[q-w]||seen[q+w]){const i=q*4;if(Math.hypot(p[i]-R,p[i+1]-G,p[i+2]-B)<tol*1.8)p[i+3]=110;}}
+  g.putImageData(im,0,0);
+}
+async function artEdLoadFile(file){
+  const bm=await createImageBitmap(file);
+  const sc=Math.min(1,960/Math.max(bm.width,bm.height));
+  const c=document.createElement('canvas');c.width=Math.round(bm.width*sc);c.height=Math.round(bm.height*sc);
+  c.getContext('2d').drawImage(bm,0,0,c.width,c.height);
+  artEdC=c;artEdOrig=null;artEdDirty=true;
+  const keep=artEdA&&artEdA.id?artEdA.id:null;
+  artEdA=Object.assign(artDef({w:c.width,h:c.height}),{id:keep||('a'+Date.now().toString(36))});
+  artEdSample();artEdUi();
+}
+const artEdSample=()=>artSampleLid();
+function artEdUi(){
+  const has=!!artEdC;
+  $('artTools').hidden=!has;$('artPrev').hidden=!has;$('artLive').hidden=!has;$('artSave').disabled=!has;
+  if(!has)return;
+  $('artSize').value=artEdA.ms;$('artEye').value=artEdA.es;$('artH').value=artEdA.h;$('artSplit').checked=artEdA.sp>0.05;$('artSide').checked=!!artEdA.side;
+  [...$('artPick').children].forEach(b=>b.classList.toggle('on',b.dataset.k===artEdTool));
+  artEdDraw();
+}
+function artEdDraw(){
+  const cv=$('artPrev'),g=cv.getContext('2d');
+  const I=artEdC,A=artEdA;if(!I)return;
+  const cw=cv.width,ch=cv.height,s=Math.min(cw/I.width,ch/I.height),dw=I.width*s,dh=I.height*s,ox=(cw-dw)/2,oy=(ch-dh)/2;
+  g.clearRect(0,0,cw,ch);
+  for(let y=0;y<ch;y+=16)for(let x=0;x<cw;x+=16){g.fillStyle=((x+y)/16)%2?'#3a3a4c':'#2c2c3c';g.fillRect(x,y,16,16);}
+  g.drawImage(I,ox,oy,dw,dh);
+  const P=(fx,fy)=>[ox+fx*dw,oy+fy*dh];
+  const mk=(pt,col,lab)=>{g.strokeStyle=col;g.fillStyle=col;g.lineWidth=3;g.beginPath();g.arc(pt[0],pt[1],9,0,7);g.stroke();g.font='bold 13px system-ui';g.fillText(lab,pt[0]+12,pt[1]-8);};
+  mk(P(A.mx,A.my),'#ff6b6b','mouth');mk(P(A.ex1,A.ey1),'#74c0fc','eye');mk(P(A.ex2,A.ey2),'#74c0fc','eye');
+  g.strokeStyle='#ffd43b';g.setLineDash([4,3]);g.beginPath();g.ellipse(...P(A.mx,A.my),A.ms*dw/2,A.ms*dw*0.12,0,0,7);g.stroke();g.setLineDash([]);
+  if(A.sp>0.05){const y=oy+A.sp*dh;g.strokeStyle='#69db7c';g.lineWidth=2;g.setLineDash([8,5]);g.beginPath();g.moveTo(ox,y);g.lineTo(ox+dw,y);g.stroke();g.setLineDash([]);g.fillStyle='#69db7c';g.font='bold 12px system-ui';g.fillText('head | body',ox+4,y-4);}
+}
+function artEdLive(){
+  cancelAnimationFrame(artEdRaf);
+  const cv=$('artLive');
+  const loop=t=>{
+    if($('artEd').hidden||!artEdC)return;
+    const g=cv.getContext('2d'),tt=t/1000;
+    g.clearRect(0,0,cv.width,cv.height);g.fillStyle='#8ecae6';g.fillRect(0,0,cv.width,cv.height);g.fillStyle='#6a994e';g.fillRect(0,cv.height-26,cv.width,26);
+    const H=cv.height*0.82*artEdA.h,open=Math.max(0,Math.sin(tt*9))*(Math.sin(tt*2.3)>-0.3?1:0),sh=1+Math.floor(Math.abs(Math.sin(tt*4.1))*3);
+    const bt=(t%3000);const blink=bt<150?Math.sin(bt/150*Math.PI):0;
+    g.save();g.translate(cv.width/2,cv.height-22);
+    artPaint(g,{c:artEdC,w:artEdC.width,h:artEdC.height},artEdA,{H,open,sh,blink,headRot:Math.sin(tt*7)*0.03,headDy:open*2,fc:1});
+    g.restore();
+    artEdRaf=requestAnimationFrame(loop);
+  };
+  artEdRaf=requestAnimationFrame(loop);
+}
+function artOpen(name){
+  artEdName=name;const f=cfg[name];
+  artEdA=f.art?Object.assign({},f.art):null;artEdC=null;artEdOrig=null;artEdDirty=false;artEdTool='mouth';
+  $('artEd').hidden=false;$('artEdMsg').textContent='';$('artEdTitle').textContent='🖼 Picture for '+name;
+  if(artEdA&&artEdA.id){
+    artGet(artEdA.id).then(async r=>{if(!r)return;const bm=await createImageBitmap(r.blob);const c=document.createElement('canvas');c.width=bm.width;c.height=bm.height;c.getContext('2d').drawImage(bm,0,0);artEdC=c;artEdUi();artEdLive();}).catch(()=>{});
+  }
+  artEdUi();
+}
+$('artFile').onchange=async()=>{const f=$('artFile').files[0];$('artFile').value='';if(!f)return;try{await artEdLoadFile(f);$('artEdMsg').textContent='Now tap the picture to place the mouth and the eyes (use the buttons above it).';artEdLive();}catch(e){$('artEdMsg').textContent='Could not read that picture. Use a PNG or JPG.';}};
+$('artPick').onclick=e=>{const b=e.target.closest('button');if(!b)return;artEdTool=b.dataset.k;artEdUi();};
+$('artPrev').onclick=e=>{
+  if(!artEdC)return;
+  const cv=$('artPrev'),r=cv.getBoundingClientRect(),px=(e.clientX-r.left)*cv.width/r.width,py=(e.clientY-r.top)*cv.height/r.height;
+  const I=artEdC,s=Math.min(cv.width/I.width,cv.height/I.height),dw=I.width*s,dh=I.height*s,ox=(cv.width-dw)/2,oy=(cv.height-dh)/2;
+  const fx=clamp((px-ox)/dw,0,1),fy=clamp((py-oy)/dh,0,1),A=artEdA;
+  if(artEdTool==='mouth'){A.mx=fx;A.my=fy;}else if(artEdTool==='eye1'){A.ex1=fx;A.ey1=fy;}else if(artEdTool==='eye2'){A.ex2=fx;A.ey2=fy;}else if(artEdTool==='split'){A.sp=clamp(fy,0.08,0.7);}
+  artEdDirty=true;artSampleLid();artEdDraw();
+};
+$('artSize').oninput=()=>{artEdA.ms=+$('artSize').value;artEdDraw();};
+$('artEye').oninput=()=>{artEdA.es=+$('artEye').value;artSampleLid();artEdDraw();};
+$('artH').oninput=()=>{artEdA.h=+$('artH').value;};
+$('artSplit').onchange=()=>{artEdA.sp=$('artSplit').checked?(artEdA.sp>0.05?artEdA.sp:0.34):0;artEdDraw();};
+$('artSide').onchange=()=>{artEdA.side=$('artSide').checked;};
+$('artBg').onclick=()=>{
+  if(!artEdC)return;
+  if(!artEdOrig){artEdOrig=document.createElement('canvas');artEdOrig.width=artEdC.width;artEdOrig.height=artEdC.height;artEdOrig.getContext('2d').drawImage(artEdC,0,0);}
+  artRemoveBg(artEdC,+$('artTol').value,$('artEvery').checked);artEdDirty=true;artSampleLid();artEdDraw();
+  $('artEdMsg').textContent='Background removed. If parts of the character disappeared, press Undo and use a lower number.';
+};
+$('artUndo').onclick=()=>{if(!artEdOrig)return;artEdC.getContext('2d').clearRect(0,0,artEdC.width,artEdC.height);artEdC.getContext('2d').drawImage(artEdOrig,0,0);artEdOrig=null;artSampleLid();artEdDraw();};
+$('artSave').onclick=async()=>{
+  if(!artEdC||!artEdName)return;
+  try{
+    if(artEdDirty){const blob=await new Promise(r=>artEdC.toBlob(r,'image/png'));await artPut(artEdA.id,blob);delete ARTIMG[artEdA.id];}
+    const f=cfg[artEdName];f.art=Object.assign({},artEdA);f.style='art';save();renderCards(true);
+    $('artEd').hidden=true;cancelAnimationFrame(artEdRaf);$('status').textContent='Picture saved for '+artEdName+'. Press Play to see it move.';
+  }catch(e){$('artEdMsg').textContent='Could not save the picture on this device (storage may be full or blocked).';}
+};
+$('artClose').onclick=()=>{$('artEd').hidden=true;cancelAnimationFrame(artEdRaf);};
+function artCardRows(card,f,n){
+  const b=document.createElement('button');b.textContent=f.art&&f.art.id?'🖼 Change picture / mouth and eyes':'🖼 Add your character picture';b.style.background='#ffd43b';b.onclick=()=>artOpen(n);card.appendChild(b);
+  if(!(f.art&&f.art.id))card.appendChild(Object.assign(document.createElement('div'),{className:'hint',textContent:'Make a character picture with any AI image tool (ask for the full character, facing the front, on a plain white background), then add it here.'}));
+}
+
 /* ---------- PIPER offline voices: natural voices that run inside the app, no internet or key needed after the download ---------- */
 const PIPER_BASE='vendor/piper/';
 const PIPER_HF=['https://huggingface.co/rhasspy/piper-voices/resolve/main/','https://huggingface.co/diffusionstudio/piper-voices/resolve/main/'];
