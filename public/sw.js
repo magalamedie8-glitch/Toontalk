@@ -16,7 +16,6 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const r = e.request, u = new URL(r.url);
   if (r.method !== 'GET' || u.origin !== location.origin || u.pathname.includes('/api/')) return; // voices/AI/export always go to the server
-  if (u.pathname.endsWith('/3d.html')) return; // 3D prototype loads from the network, never replaces the 2D app's offline copy
   if (r.mode === 'navigate') { // page: try network (gets updates), fall back to the saved copy
     e.respondWith(fetch(r).then(res => { const cp = res.clone(); caches.open(VERSION).then(c => c.put('index.html', cp)); return res; })
       .catch(() => caches.match('index.html').then(m => m || caches.match('./'))));

@@ -407,6 +407,7 @@ const ALIAS={mad:'angry',crying:'sad',cry:'sad',surprised:'shocked',shock:'shock
 const BGKEYS=['day','sunset','night','home','classroom','market','village','street','compound','room','tree','hall','city','road','beach','lake','savannah','forest','shamba','park','taxipark','stadium','mountain','kitchen','hospital'];
 
 let chars={},order=[],segs=[],cfg={},voices=[],cardKey='';
+let LBLDY=0; // how far a flying character is above the ground, so its name tag can stay down
 let playing=false,idx=0,curBg='day',lastCount=0,curPic=null;
 let actx=null,dest=null,recorder=null,chunks=[],recording=false,dispStream=null;
 
@@ -563,9 +564,36 @@ async function loadServerVoices(){
   if(PIPER_VOICES.length){srvVoices=srvVoices.concat(PIPER_VOICES);srvOnline=true;$('srvstat').textContent=($('srvstat').textContent+' Offline Piper voices ready: '+PIPER_VOICES.length+'.').trim();}
   renderCards(true);
 }
+/* Auto voice by character type: your saved favourites for that type first; with no server voices (offline, Piper only) pick a Piper voice that fits the type and give each character a different one */
+function autoVT(f){
+  if(f.vtype&&VT[f.vtype])return f.vtype;
+  if(f.style==='animal')return '';
+  const k=String(kindOf(f)||'').toLowerCase();
+  if(/baby|infant/.test(k))return 'baby';
+  if(/granny|grandma|gran|old ?woman|mama jajja/.test(k))return 'gma';
+  if(/mzee|grandpa|jajja|old ?man|wizard/.test(k))return 'gpa';
+  if(/girl/.test(k))return 'girl';
+  if(/boy|kid|child/.test(k))return 'boy';
+  if(/woman|queen|lady|mama|nurse/.test(k))return 'woman';
+  if(/man|king|boda|chef|doctor|pirate|cowboy/.test(k))return 'man';
+  return '';
+}
+function autoVoiceFor(f,i){
+  if(!srvVoices.length)return null;
+  const vt=autoVT(f),fav=(vt&&favVoices[vt]||[]).map(id=>srvVoices.find(v=>v.id===id)).filter(Boolean);
+  if(fav.length)return fav[i%fav.length];
+  if(srvVoices.some(v=>v.auto))return null; // a server voice list with its own auto voices keeps working as before
+  const T=vt?VT[vt]:null,want=T?(T.age==='baby'?'child':T.age):'adult',ar=a=>Math.abs(['child','teen','adult','elder'].indexOf(a)-['child','teen','adult','elder'].indexOf(want));
+  const c=srvVoices.map(v=>({v,t:tagOf(v)})).filter(x=>!T||!T.g||!x.t.g||x.t.g===T.g);
+  if(!c.length)return null;
+  c.forEach(x=>{x.sc=(/^(en|sw)(-|_|$)/i.test(x.v.lang||'en')?0:20)+((T&&T.g&&x.t.g===T.g)?0:6)+ar(x.t.a)*2;});
+  c.sort((a,b)=>a.sc-b.sc);
+  const best=c.filter(x=>x.sc===c[0].sc);
+  return (best.length>1?best:c)[i%(best.length>1?best.length:c.length)].v;
+}
 function resolveSrv(f,i){
   if(!srvOnline||!f||f.voice==='blip')return null;
-  if(f.voice===''){const pool=srvVoices.filter(v=>v.auto);const p=pool.length?pool:srvVoices;return p[i%p.length];}
+  if(f.voice===''){const av=autoVoiceFor(f,i);if(av)return av;const pool=srvVoices.filter(v=>v.auto);const p=pool.length?pool:srvVoices;return p[i%p.length];}
   if(f.voice.startsWith('srv:'))return srvVoices.find(v=>'srv:'+v.id===f.voice)||null;
   return null;
 }
@@ -712,6 +740,13 @@ function build(){
     if(m){segs.push({type:'prop',op:'remove',name:propKey(m[1]),dur:0.25});return;}
     m=l.match(/^\[\s*(?:prop|props|item)\s*:\s*(.+?)\s+(?:at|on|near|beside|by|in)\s+(?:the\s+)?(.+?)\s*\]$/i);
     if(m){const nm=propKey(m[1]);if(nm)segs.push({type:'prop',op:'place',name:nm,dest:parseDest(m[2]),dur:0.3});return;}
+    { // flying characters: [Kio flies to the right] [Kio soars] [Kio hovers] [Kio lands]
+      const fm=l.match(/^\[\s*([^\]]{1,20}?)\s+(flies|flits|soars|glides|hovers|floats|swoops|takes\s+off|flaps\s+up|lands?|touches\s+down|comes\s+down|swoops\s+down|descends)(?:\s+(?:up|high|higher|over|above|away))?(?:\s+(?:to|towards?|toward)\s+(?:the\s+)?(.+?))?\s*\]$/i);
+      if(fm){const fw=findChar(fm[1].trim());
+        if(fw){const v=fm[2].toLowerCase(),land=/^(land|touch|comes\s+down|swoops\s+down|descends)/.test(v);
+          const alt=land?0:/soar|high/.test(l.toLowerCase())?240:/hover|float/.test(v)?85:150;
+          segs.push({type:'act',who:fw,kind:land?'land':'fly',alt,dest:fm[3]?parseDest(fm[3]):null,dur:1});return;}}
+    }
     { // vehicles: ride, get off, drive, arrive, honk
       const splitWho=t=>{t=t.trim();if(/^(everyone|everybody|all of them|they|both)$/i.test(t))return order.slice();const parts=t.split(/\s*(?:&|\+|,|\band\b)\s*/i).map(x=>x.trim()).filter(Boolean);if(!parts.length||parts.some(x=>x.length>20||/\s(the|a|an)\s/i.test(' '+x+' ')))return null;const r=[];for(const x of parts){const w=findChar(x);if(!w)return null;r.push(w);}return r;};
       let mv=l.match(/^\[\s*(.+?)\s+(?:rides?|drives?|cycles?|pedals?|boards?|flies|sails|gets?\s+(?:in|into|on|onto)|hops?\s+(?:in|into|on|onto)|jumps?\s+(?:in|into|on|onto)|climbs?\s+(?:in|into|on|onto)|sits?\s+(?:in|on)|travels?\s+(?:by|in|on))\s+(?:the\s+|a\s+|an\s+|his\s+|her\s+|their\s+|my\s+)?([a-z][a-z \-]*?)(?:\s+(?:to|towards?|toward)\s+(.+?))?\s*\]$/i);
@@ -1595,10 +1630,10 @@ function drawChar(c,x,sc,speaking,emo,isSp,tt){
   ctx.font='bold '+(sc<0.72?16:24)+'px system-ui,Arial';ctx.textAlign='center'; // smaller name tags when characters stand close together
   if(isSp){
     const w=ctx.measureText(c.name).width+30;
-    ctx.fillStyle='#ffd43b';ctx.beginPath();ctx.roundRect(x-w/2,908,w,38,19);ctx.fill();
-    ctx.fillStyle='#111';ctx.fillText(c.name,x,935);
+    ctx.fillStyle='#ffd43b';ctx.beginPath();ctx.roundRect(x-w/2,908+LBLDY,w,38,19);ctx.fill();
+    ctx.fillStyle='#111';ctx.fillText(c.name,x,935+LBLDY);
   }else{
-    ctx.fillStyle='#fff';ctx.shadowColor='#0008';ctx.shadowBlur=6;ctx.fillText(c.name,x,935);ctx.shadowBlur=0;
+    ctx.fillStyle='#fff';ctx.shadowColor='#0008';ctx.shadowBlur=6;ctx.fillText(c.name,x,935+LBLDY);ctx.shadowBlur=0;
   }
 }
 
@@ -1716,6 +1751,12 @@ function stickEnter(s,now){
   if(!S.on||S.leaving)doEnter(S,s.who,null,now);
   if(s.type==='act'){
     if(s.kind==='react')return;
+    if(s.kind==='fly'||s.kind==='land'){
+      if(S.sit){S.sit=false;S.sitT=now;}
+      S.altT=s.kind==='land'?0:s.alt||150;
+      if(s.dest){const tx=resolveDest(S,s.who,s.dest);if(tx!=null){S.pin=true;const d=startMove(S,tx,false,now,null);s.dur=Math.max(1.0,d*0.9+0.3);return;}}
+      s.dur=s.kind==='land'?1.2:1.0;return;
+    }
     if(s.kind==='walk'||s.kind==='run'){
       const tx=resolveDest(S,s.who,s.dest||{tx:s.tx});
       if(tx==null){s.dur=0.3;return;}
@@ -1752,6 +1793,10 @@ function tickActor(n,i,xs,now){
   if(S.sitAt!=null&&now>=S.sitAt){S.sit=true;S.sitT=now;S.sitAt=null;}
   const dx=S.x-S.last;S.moving=Math.abs(dx)>0.05&&S.slideTo==null&&!S.ride;
   if(S.moving){setFace(S,dx>0?1:-1,now);S.travel+=Math.abs(dx);}
+  if(S.altT==null){S.altT=0;S.alt=0;}
+  S.alt+=(S.altT-S.alt)*0.05;if(Math.abs(S.altT-S.alt)<0.6)S.alt=S.altT;
+  S.flying=S.alt>6;S.glide=false;
+  if(S.flying&&S.moving){S.glide=true;S.moving=false;} // in the air: glide, no walking legs
   S.last=S.x;
   if(S.on&&!S.leaving&&!S.moving&&!S.mv&&!S.act&&CUR_SPK&&!S.ride){ // face the conversation
     let ox=null;
@@ -1769,6 +1814,11 @@ function drawActor(n,i,xs,sc,speaking,emo,isSp,tt,now){
   if(playing){S=tickActor(n,i,xs,now);x=S.x;sc=S.sc;dyy=S.dy;
     if(S.ride){const vp=S.ride.p,vd=VEH[vp.name];if(vd){const psc=propSc();sc=psc*vd.k;dyy=vehFloor(vp,S.ride.i,now,psc)-(S.ride.hop||0)*psc-(BASE_Y+204*sc);}}}
   else{S={x,face:x<W/2?1:-1,travel:0,moving:false,run:false,act:null,sit:initSit(n)};if(LAYP){sc=LAYP.scs[c.i];dyy=LAYP.dys[c.i];}}
+  if(playing&&S&&S.alt>0.5){ // flying: shadow stays on the ground, the body floats up and bobs
+    const fl=S.alt,gy=BASE_Y+204*(sc||1)+(dyy||0);
+    ctx.save();ctx.globalAlpha=Math.max(0.08,0.32-fl/900);ctx.fillStyle='#000';ctx.beginPath();ctx.ellipse(x,gy+2,Math.max(8,46*(sc||1)*(1-Math.min(0.5,fl/520))),9*(sc||1),0,0,7);ctx.fill();ctx.restore();
+    const d0=dyy||0;dyy=d0-fl*(sc||1)+(S.flying?Math.sin(now/260+(chars[n].i||0)*1.3)*6*(sc||1):0);S.lblDy=d0-dyy; // name tag stays down on the ground
+  }else if(S)S.lblDy=0;
   ctx.save();ctx.translate(0,dyy||0);
   if(playing&&S&&S.x!=null){ // small squash-and-stretch whenever something changes: new emotion, starts talking, stops walking
     if(S.pEmo!==undefined&&S.pEmo!==emo)S.pT1=now;S.pEmo=emo;
@@ -1787,6 +1837,7 @@ function drawActor(n,i,xs,sc,speaking,emo,isSp,tt,now){
       for(let q=0;q<9;q++){const a=q*0.7+0.3,d=pk*(36+q%3*14)*(sc||1),r=(10+q%4*5)*(sc||1)*(1-Math.abs(pk-0.5)*0.9);ctx.globalAlpha=Math.max(0,0.8-pk*0.7);ctx.fillStyle='#f1f3f5';ctx.beginPath();ctx.arc(Math.cos(a)*d,-Math.abs(Math.sin(a))*d*0.9-r*0.3,Math.max(1,r),0,7);ctx.fill();}
       ctx.restore();ctx.globalAlpha=1;
       ctx.save();ctx.globalAlpha=clamp(e*1.4,0,1);ctx.translate(x,gy);ctx.scale(pop,pop);ctx.translate(-x,-gy);}}
+  LBLDY=(playing&&S&&S.lblDy)||0;
   const fig=FIGURES[f.style]||FIGURES.cartoon;
   HEADY[n]=null;
   if(fig.draw){
@@ -2032,10 +2083,10 @@ function drawStick(c,x,sc,speaking,emo,isSp,tt,now,S){
   ctx.font='bold '+(sc<0.72?16:24)+'px system-ui,Arial';ctx.textAlign='center'; // smaller name tags when characters stand close together
   if(isSp){
     const w=ctx.measureText(c.name).width+30;
-    ctx.fillStyle='#ffd43b';ctx.beginPath();ctx.roundRect(x-w/2,908,w,38,19);ctx.fill();
-    ctx.fillStyle='#111';ctx.fillText(c.name,x,935);
+    ctx.fillStyle='#ffd43b';ctx.beginPath();ctx.roundRect(x-w/2,908+LBLDY,w,38,19);ctx.fill();
+    ctx.fillStyle='#111';ctx.fillText(c.name,x,935+LBLDY);
   }else{
-    ctx.fillStyle='#fff';ctx.shadowColor='#0008';ctx.shadowBlur=6;ctx.fillText(c.name,x,935);ctx.shadowBlur=0;
+    ctx.fillStyle='#fff';ctx.shadowColor='#0008';ctx.shadowBlur=6;ctx.fillText(c.name,x,935+LBLDY);ctx.shadowBlur=0;
   }
 }
 
@@ -2347,8 +2398,8 @@ function drawReal(c,x,sc,speaking,emo,isSp,tt,now,S){
   ctx.restore();ctx.restore();
   if(S.fixedPose)return;
   ctx.font='bold '+(sc<0.72?16:24)+'px system-ui,Arial';ctx.textAlign='center';
-  if(isSp){const w=ctx.measureText(c.name).width+30;ctx.fillStyle='#ffd43b';ctx.beginPath();ctx.roundRect(x-w/2,908,w,38,19);ctx.fill();ctx.fillStyle='#111';ctx.fillText(c.name,x,935);}
-  else{ctx.fillStyle='#fff';ctx.shadowColor='#0008';ctx.shadowBlur=6;ctx.fillText(c.name,x,935);ctx.shadowBlur=0;}
+  if(isSp){const w=ctx.measureText(c.name).width+30;ctx.fillStyle='#ffd43b';ctx.beginPath();ctx.roundRect(x-w/2,908+LBLDY,w,38,19);ctx.fill();ctx.fillStyle='#111';ctx.fillText(c.name,x,935+LBLDY);}
+  else{ctx.fillStyle='#fff';ctx.shadowColor='#0008';ctx.shadowBlur=6;ctx.fillText(c.name,x,935+LBLDY);ctx.shadowBlur=0;}
 }
 
 /* ---------- REAL ANIMALS: four legs (and two-legged birds) that walk, trot, gallop, sit, jump, play and talk ---------- */
@@ -2367,9 +2418,19 @@ const ANIMALS={
   elephant:{n:'Elephant',coat:'#8f9ba7',belly:'#a8b2bc',dark:'#5d6873',bl:190,bh:104,ll:96,neck:20,nA:26,hs:46,sn:0,ear:'huge',tail:'stub',tl:46,sz:1,mark:'none',trunk:1,tusks:1},
   giraffe:{n:'Giraffe',coat:'#e8bb55',belly:'#f2d890',dark:'#8a4a14',bl:124,bh:58,ll:128,neck:134,nA:72,hs:20,sn:24,ear:'point',tail:'tuft',tl:72,sz:1,mark:'spots',horns:'ossi'},
   chicken:{n:'Chicken',vs:1.7,bird:1,coat:'#f4ece0',belly:'#f4ece0',dark:'#b5301c',bl:58,bh:52,ll:36,neck:24,nA:72,hs:14,sn:9,tail:'feather',tl:34,sz:1,comb:1,beak:'#f6b620',legc:'#f0b52a'},
-  duck:{n:'Duck',vs:1.7,bird:1,coat:'#f8f0d0',belly:'#fff8dd',dark:'#2f7d4f',bl:64,bh:46,ll:26,neck:22,nA:62,hs:15,sn:14,tail:'feather',tl:22,sz:1,flat:1,beak:'#f6a21e',legc:'#f19a1a'}
+  duck:{n:'Duck',vs:1.7,bird:1,coat:'#f8f0d0',belly:'#fff8dd',dark:'#2f7d4f',bl:64,bh:46,ll:26,neck:22,nA:62,hs:15,sn:14,tail:'feather',tl:22,sz:1,flat:1,beak:'#f6a21e',legc:'#f19a1a'},
+  hyena:{n:'Hyena',vs:1.45,coat:'#b8a06a',belly:'#d9c9a0',dark:'#4a3a22',bl:108,bh:50,ll:58,neck:34,nA:30,hs:25,sn:24,ear:'round',tail:'tuft',tl:34,sz:1,mark:'spots',mane:1},
+  hippo:{n:'Hippo',coat:'#8f8799',belly:'#b9aebd',dark:'#5b5266',bl:172,bh:100,ll:30,neck:16,nA:18,hs:46,sn:40,ear:'round',tail:'stub',tl:14,sz:1,mark:'none',snoutC:'#a99dae'},
+  crocodile:{n:'Crocodile',vs:1.5,coat:'#5f8a45',belly:'#d4dc9c',dark:'#2d4a24',bl:150,bh:36,ll:16,neck:8,nA:12,hs:20,sn:62,ear:'round',tail:'rope',tl:130,sz:1,mark:'spots'},
+  buffalo:{n:'Buffalo',coat:'#4b403a',belly:'#5d4f47',dark:'#1e1814',bl:152,bh:78,ll:62,neck:26,nA:28,hs:34,sn:26,ear:'side',tail:'rope',tl:76,sz:1,mark:'none',horns:'back',snoutC:'#2a2220'},
+  warthog:{n:'Warthog',vs:1.35,coat:'#8c7658',belly:'#a08a6a',dark:'#3a2e20',bl:102,bh:58,ll:46,neck:14,nA:24,hs:28,sn:22,ear:'point',tail:'tuft',tl:40,sz:1,mark:'none',mane:1,disc:1},
+  tortoise:{n:'Tortoise',vs:1.7,coat:'#9aa65a',belly:'#c7c98c',dark:'#5c4a2a',bl:90,bh:70,ll:14,neck:18,nA:38,hs:17,sn:12,ear:'none',tail:'stub',tl:10,sz:1,mark:'none',shell:1},
+  crane:{n:'Crowned crane',vs:1.35,bird:1,coat:'#8e949c',belly:'#d9dce0',dark:'#d9a520',bl:54,bh:40,ll:76,neck:58,nA:76,hs:12,sn:9,tail:'feather',tl:36,sz:1,crest:1,beak:'#3b3b3b',legc:'#333333'},
+  hornbill:{n:'Hornbill',vs:1.6,bird:1,coat:'#2b2b2e',belly:'#f4f1ea',dark:'#d9a520',bl:70,bh:44,ll:34,neck:20,nA:66,hs:16,sn:14,tail:'feather',tl:44,sz:1,bigbeak:1,beak:'#f0b21c',legc:'#3a3a3a'},
+  parrot:{n:'Parrot',vs:1.9,bird:1,coat:'#e63b2e',belly:'#f4c430',dark:'#2f8f4e',bl:46,bh:44,ll:22,neck:18,nA:70,hs:16,sn:12,tail:'feather',tl:70,sz:1,beak:'#f2efe6',legc:'#9a9a94'},
+  eagle:{n:'Eagle',vs:1.5,bird:1,coat:'#6b4a2a',belly:'#8a6a44',dark:'#f3f0e8',bl:68,bh:50,ll:36,neck:22,nA:66,hs:17,sn:14,tail:'feather',tl:44,sz:1,beak:'#f2b21c',legc:'#e0a824'}
 };
-const ANIMAL_SYN={puppy:'dog',doggy:'dog',hound:'dog',kitten:'cat',kitty:'cat',bull:'cow',calf:'cow',cattle:'cow',pony:'horse',stallion:'horse',donkey:'horse',lamb:'sheep',ram:'sheep',piglet:'pig',hog:'pig',boar:'pig',bunny:'rabbit',hare:'rabbit',hen:'chicken',rooster:'chicken',cock:'chicken',chick:'chicken',duckling:'duck',ducks:'duck','mama goat':'goat',kid:'goat',nanny:'goat'};
+const ANIMAL_SYN={puppy:'dog',doggy:'dog',hound:'dog',kitten:'cat',kitty:'cat',bull:'cow',calf:'cow',cattle:'cow',pony:'horse',stallion:'horse',donkey:'horse',lamb:'sheep',ram:'sheep',piglet:'pig',hog:'pig',boar:'pig',bunny:'rabbit',hare:'rabbit',hen:'chicken',rooster:'chicken',cock:'chicken',chick:'chicken',duckling:'duck',ducks:'duck','mama goat':'goat',kid:'goat',nanny:'goat',hippopotamus:'hippo',croc:'crocodile',alligator:'crocodile',crocs:'crocodile',turtle:'tortoise',tortoises:'tortoise','crowned crane':'crane','grey crowned crane':'crane','gray crowned crane':'crane',cranes:'crane',hornbills:'hornbill',macaw:'parrot',parakeet:'parrot',parrots:'parrot',eagles:'eagle',hawk:'eagle',kite:'eagle','wild buffalo':'buffalo','cape buffalo':'buffalo',ox:'buffalo','wart hog':'warthog',pumba:'warthog',hyenas:'hyena',hippos:'hippo'};
 function animalFromWord(w){
   w=String(w).toLowerCase().replace(/\s*\(.*\)\s*/g,' ').trim();
   let pre=false;
@@ -2431,6 +2492,11 @@ function animalPoseRaw(T,emo,speaking,S,tt,now,c){
       P.legs=[[a[0],a[0]-55*a[1]],[b[0],b[0]-55*b[1]],[18+b[0]*0.9,-22+b[0]*0.5-42*b[1]],[18+a[0]*0.9,-22+a[0]*0.5-42*a[1]]];
       P.dy=-Math.abs(Math.sin(u*Math.PI*2))*L*0.025;P.neck+=Math.sin(u*Math.PI*2)*3;P.pitch=Math.sin(u*Math.PI*4)*1.2;
     }
+  }
+  if(S.flying){ // in the air: wings beat, legs tuck, body leans forward
+    const fw=S.glide?0.35:0.7,beat=Math.sin(tt*(S.glide?9:13)+ph);
+    if(T.bird){P.wing=0.55+0.6*beat*fw+0.3;P.legs=[[38,-34],[34,-30]];P.pitch=-8-(S.glide?6:0);P.dy+=beat*2;P.neck+=8;}
+    else{P.legs=[[-30,-60],[-26,-56],[48,-70],[44,-66]];P.pitch=-6;P.tail=Math.sin(tt*6)*18;P.ear=0.5;}
   }
   const sw=sitW(S,now);
   if(sw>0){ // sit (dogs and cats), or settle down on bended legs
@@ -2557,6 +2623,7 @@ function drawAnimal(c,x,sc,speaking,emo,isSp,tt,now,S){
   ctx.fillStyle=sh;ctx.fillRect(-bl,cy-bh,bl*2,bh*2);
   if(T.bird){ctx.fillStyle=_ash(coat,0.12);ctx.save();ctx.translate(-bl*0.05,cy+2);ctx.rotate(-0.2-P.wing*0.9);ctx.beginPath();ctx.ellipse(-bl*0.12,0,bl*0.36,bh*0.3,0,0,7);ctx.fill();ctx.strokeStyle='rgba(0,0,0,.18)';ctx.lineWidth=1.2;for(let k=0;k<3;k++){ctx.beginPath();ctx.moveTo(-bl*0.4+k*6,-bh*0.1);ctx.lineTo(-bl*0.4+k*6+4,bh*0.18);ctx.stroke();}ctx.restore();}
   ctx.restore();
+  if(T.shell){const sg=ctx.createLinearGradient(0,cy-bh*0.8,0,cy+bh*0.2);sg.addColorStop(0,'#8a6a34');sg.addColorStop(1,'#5a4220');ctx.fillStyle=sg;ctx.beginPath();ctx.ellipse(0,cy+bh*0.18,bl*0.56,bh*0.82,0,Math.PI,2*Math.PI);ctx.closePath();ctx.fill();ctx.strokeStyle='#3a2a12';ctx.lineWidth=2.4;ctx.stroke();ctx.beginPath();for(let k=-2;k<=2;k++){ctx.moveTo(k*bl*0.18,cy+bh*0.18);ctx.lineTo(k*bl*0.13,cy-bh*0.62);}ctx.moveTo(-bl*0.5,cy-bh*0.12);ctx.quadraticCurveTo(0,cy-bh*0.36,bl*0.5,cy-bh*0.12);ctx.stroke();}
   if(T.mane){ctx.fillStyle=T.dark;ctx.beginPath();ctx.moveTo(bl*0.3,cy-bh*0.45);ctx.quadraticCurveTo(bl*0.42,cy-bh*0.85,bl*0.56,cy-bh*0.5-T.neck*0.7);ctx.lineTo(bl*0.48,cy-bh*0.38);ctx.closePath();ctx.fill();}
   ctx.restore();
   // near legs
@@ -2625,6 +2692,8 @@ function drawAnimal(c,x,sc,speaking,emo,isSp,tt,now,S){
     if(T.flat){ctx.beginPath();ctx.ellipse(hs*0.95,hs*0.12-0,hs*0.75,hs*0.2,0,0,7);ctx.fill();ctx.fillStyle=_ash(T.beak,0.15);ctx.beginPath();ctx.ellipse(hs*0.9,hs*0.28+bo,hs*0.6,hs*0.12,0,0,7);ctx.fill();}
     else{ctx.beginPath();ctx.moveTo(hs*0.7,-hs*0.18);ctx.lineTo(hs*1.5,hs*0.1);ctx.lineTo(hs*0.7,hs*0.12);ctx.closePath();ctx.fill();ctx.fillStyle=_ash(T.beak,0.12);ctx.beginPath();ctx.moveTo(hs*0.7,hs*0.14);ctx.lineTo(hs*1.35,hs*0.14+bo);ctx.lineTo(hs*0.7,hs*0.3+bo*0.5);ctx.closePath();ctx.fill();}
     if(T.comb){ctx.fillStyle=T.dark;for(let k=0;k<3;k++)_ael(-hs*0.25+k*hs*0.3,-hs*0.95,hs*0.18,hs*0.22,0);ctx.beginPath();ctx.ellipse(hs*0.6,hs*0.62+jaw*2,hs*0.14,hs*0.3,0,0,7);ctx.fill();}
+    if(T.crest){ctx.strokeStyle='#e0b020';ctx.lineWidth=2.4;ctx.lineCap='round';for(let k=-3;k<=3;k++){ctx.beginPath();ctx.moveTo(-hs*0.1+k*hs*0.05,-hs*0.8);ctx.lineTo(-hs*0.1+k*hs*0.3,-hs*(1.75-Math.abs(k)*0.1));ctx.stroke();ctx.fillStyle='#e0b020';ctx.beginPath();ctx.arc(-hs*0.1+k*hs*0.3,-hs*(1.75-Math.abs(k)*0.1),2.2,0,7);ctx.fill();}ctx.fillStyle='#f3f3f0';_ael(hs*0.1,hs*0.12,hs*0.38,hs*0.3,0);ctx.fillStyle='#d8434a';_ael(hs*0.35,hs*0.6+jaw*2,hs*0.2,hs*0.26,0);}
+    if(T.bigbeak){ctx.fillStyle=T.beak;ctx.beginPath();ctx.moveTo(hs*0.6,-hs*0.22);ctx.quadraticCurveTo(hs*1.5,-hs*0.95,hs*2.4,hs*0.08);ctx.lineTo(hs*0.7,hs*0.14);ctx.closePath();ctx.fill();ctx.fillStyle='#d4572a';ctx.beginPath();ctx.moveTo(hs*1.0,-hs*0.4);ctx.quadraticCurveTo(hs*1.7,-hs*0.9,hs*2.0,-hs*0.12);ctx.lineTo(hs*1.0,-hs*0.12);ctx.closePath();ctx.fill();}
   }
   if(T.n==='Rabbit'){ctx.fillStyle='#e58a98';ctx.beginPath();ctx.arc(hs*0.95+Math.sin(tt*14)*0.8,hs*0.12,2.4,0,7);ctx.fill();}
   // eye
@@ -2642,8 +2711,8 @@ function drawAnimal(c,x,sc,speaking,emo,isSp,tt,now,S){
   ctx.restore();
   // name tag
   ctx.save();ctx.font='bold '+(sc0<0.72?16:24)+'px system-ui,Arial';ctx.textAlign='center';
-  if(isSp){const w=ctx.measureText(c.name).width+30;ctx.fillStyle='#ffd43b';ctx.beginPath();ctx.roundRect(x-w/2,908,w,38,19);ctx.fill();ctx.fillStyle='#111';ctx.fillText(c.name,x,935);}
-  else{ctx.fillStyle='#fff';ctx.shadowColor='#0008';ctx.shadowBlur=6;ctx.fillText(c.name,x,935);ctx.shadowBlur=0;}
+  if(isSp){const w=ctx.measureText(c.name).width+30;ctx.fillStyle='#ffd43b';ctx.beginPath();ctx.roundRect(x-w/2,908+LBLDY,w,38,19);ctx.fill();ctx.fillStyle='#111';ctx.fillText(c.name,x,935+LBLDY);}
+  else{ctx.fillStyle='#fff';ctx.shadowColor='#0008';ctx.shadowBlur=6;ctx.fillText(c.name,x,935+LBLDY);ctx.shadowBlur=0;}
   ctx.restore();
 }
 function animalCardRows(card,f,n){ // Species and coat colour pickers for the Animal style
@@ -6244,4 +6313,4 @@ window.addEventListener('beforeinstallprompt',e=>{
 window.addEventListener('appinstalled',()=>{const b=document.getElementById('btnInstall');if(b)b.remove()});
 </script>
 </body>
-</html>
+</html>

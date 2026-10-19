@@ -1,0 +1,79 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ToonTalk Puppets (prototype)</title>
+<style>
+body{margin:0;font-family:system-ui,Arial,sans-serif;background:#12121a;color:#eee;display:flex;gap:18px;padding:14px;flex-wrap:wrap;justify-content:center;align-items:flex-start}
+.p{width:380px;max-width:100%;display:flex;flex-direction:column;gap:8px}h1{margin:0;font-size:20px;color:#ffd43b}
+textarea,select{width:100%;padding:8px;border-radius:8px;border:1px solid #333;background:#1e1e2a;color:#fff;font:inherit}textarea{height:150px}
+button{padding:11px;border:0;border-radius:8px;font-weight:700;cursor:pointer;background:#69db7c;color:#111}
+canvas{width:min(92vw,405px);aspect-ratio:9/16;border-radius:12px;background:#000}.h{font-size:12px;opacity:.7;line-height:1.5}
+</style></head><body>
+<div class="p"><h1>ToonTalk Puppets <small style="font-size:12px;color:#aaa">prototype</small></h1>
+<div class="h">One line per turn: <b>Jajja: text</b> or <b>Mama: text</b>. Mouths follow the voice loudness. Voices come from your ToonTalk server.</div>
+<textarea id="s">Jajja: Come, children! Sit under the mango tree.
+Mama: Eh! Jajja, these mangoes are sweet today!
+Jajja: Hahaha! Then eat, my grandchildren, eat!</textarea>
+<button id="go">▶ Play</button><div class="h" id="st"></div></div>
+<canvas id="c" width="720" height="1280"></canvas>
+<script>
+const $=id=>document.getElementById(id),cv=$('c'),g=cv.getContext('2d');
+// per-character setup: image, mouth centre (mx,my), mouth width, jaw radius (px in image), on-screen box
+const CH={
+ Jajja:{src:'puppets/jajja.png',mx:100,my:107,mw:19,jr:[40,40],bx:-30,by:150,sc:2.5,fem:false,pit:0.8},
+ Mama:{src:'puppets/jajja_woman.png',mx:112,my:161,mw:36,jr:[48,40],bx:380,by:300,sc:1.3,fem:true,pit:0.9}
+};
+for(const k in CH){const c=CH[k];c.img=new Image();c.img.src=c.src;c.open=0;c.t=0;c.jaw=document.createElement('canvas');}
+function jawPiece(c){ // soft elliptical piece of the lower face, cut once
+  const w=c.jr[0]*2,h=c.jr[1]*2,j=c.jaw;j.width=w;j.height=h;const x=j.getContext('2d');
+  x.drawImage(c.img,c.mx-c.jr[0],c.my,w,h,0,0,w,h); // from mouth line downward
+  const gr=x.createRadialGradient(w/2,h*0.35,h*0.12,w/2,h*0.35,Math.min(w/2,h*0.65));
+  gr.addColorStop(0,'rgba(0,0,0,1)');gr.addColorStop(0.7,'rgba(0,0,0,1)');gr.addColorStop(1,'rgba(0,0,0,0)');
+  x.globalCompositeOperation='destination-in';x.fillStyle=gr;x.fillRect(0,0,w,h);c.ready=true;
+}
+function drawChar(c,now,talking){
+  if(!c.img.complete||!c.img.naturalWidth)return;if(!c.ready)jawPiece(c);
+  const s=c.sc,iw=c.img.naturalWidth,ih=c.img.naturalHeight;
+  const bob=Math.sin(now*1.6+c.mx)*2.5+(talking?Math.sin(now*7)*1.5:0),sway=Math.sin(now*0.9+c.my)*0.012;
+  g.save();g.translate(c.bx+iw*s/2,c.by+ih*s+bob);g.rotate(sway);g.translate(-iw*s/2,-ih*s);
+  g.drawImage(c.img,0,0,iw*s,ih*s);
+  const d=c.open*c.mw*0.55; // jaw drop in image px
+  if(d>0.6){
+    // dark mouth cavity, then lower face shifted down
+    g.fillStyle='#3b0f12';g.beginPath();g.ellipse(c.mx*s,(c.my+d*0.5)*s,c.mw*0.5*s,Math.max(1,d*0.55)*s,0,0,7);g.fill();
+    g.fillStyle='#f4efe6';g.beginPath();g.ellipse(c.mx*s,(c.my+d*0.12)*s,c.mw*0.38*s,Math.max(0.5,d*0.16)*s,0,0,7);g.fill();
+    g.drawImage(c.jaw,(c.mx-c.jr[0])*s,(c.my+d)*s,c.jr[0]*2*s,c.jr[1]*2*s);
+  }
+  g.restore();
+}
+let cur=null,subs='',actx=null,ana=null,buf=null,run=false,t0=performance.now();
+function frame(){
+  const now=(performance.now()-t0)/1000;
+  const gr=g.createLinearGradient(0,0,0,1280);gr.addColorStop(0,'#bfe7ff');gr.addColorStop(0.55,'#9fd37a');gr.addColorStop(1,'#6a9b4a');
+  g.fillStyle=gr;g.fillRect(0,0,720,1280);
+  let lvl=0;if(ana){ana.getByteTimeDomainData(buf);let m=0;for(const v of buf)m=Math.max(m,Math.abs(v-128));lvl=Math.min(1,m/70);}
+  for(const k in CH){const c=CH[k],tgt=k===cur?(window.__force!=null?window.__force:lvl):0;c.open+=(tgt-c.open)*0.5;drawChar(c,now,k===cur&&tgt>0.05);}
+  if(subs){g.fillStyle='#000a';g.fillRect(30,1060,660,130);g.fillStyle='#fff';g.font='bold 30px system-ui';g.textAlign='center';
+    const w=subs.split(' ');let l='',y=1110;for(const x of w){if(g.measureText(l+x).width>600){g.fillText(l,360,y);y+=38;l='';}l+=x+' ';}g.fillText(l,360,y);g.textAlign='left';}
+  requestAnimationFrame(frame);
+}
+frame();
+const API=location.protocol==='file:'?'http://localhost:3000':'';
+async function voices(){try{const r=await fetch(API+'/api/voices');return (await r.json()).voices||[];}catch(e){return[];}}
+async function say(who,text,vs){
+  cur=who;subs=who+': '+text;const c=CH[who];
+  const v=vs.find(v=>(v.gender==='Female')===c.fem&&/^(en|lug|sw)/i.test(v.lang||'en'))||vs[0];
+  if(v){try{
+    const r=await fetch(API+'/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,voice:v.id,rate:1,pitch:v.prov==='sunbird'?1:c.pit})});
+    if(!r.ok)throw 0;const ab=await actx.decodeAudioData(await r.arrayBuffer());
+    const src=actx.createBufferSource();src.buffer=ab;ana=actx.createAnalyser();ana.fftSize=512;buf=new Uint8Array(ana.fftSize);
+    src.connect(ana);ana.connect(actx.destination);src.start();await new Promise(r=>src.onended=r);ana=null;return;}catch(e){}}
+  // no server voice: silent talking pace so you can still see the mouth
+  const t=Math.max(1.2,text.length*0.07),st=performance.now();
+  await new Promise(r=>{const iv=setInterval(()=>{window.__force=0.2+0.7*Math.abs(Math.sin((performance.now()-st)/110));if(performance.now()-st>t*1000){clearInterval(iv);window.__force=null;r();}},40);});
+}
+$('go').onclick=async()=>{
+  if(run)return;run=true;actx=actx||new AudioContext();const vs=await voices();
+  $('st').textContent=vs.length?'Voice server connected.':'No voice server found: mouths move with a silent timer.';
+  for(const ln of $('s').value.split('\n')){const m=ln.match(/^\s*(\w+)\s*:\s*(.+)$/);if(!m||!CH[m[1]])continue;await say(m[1],m[2],vs);await new Promise(r=>setTimeout(r,250));}
+  cur=null;subs='';run=false;
+};
+</script></body></html>
