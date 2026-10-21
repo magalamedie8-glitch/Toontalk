@@ -1,6 +1,6 @@
 /* ToonTalk service worker: makes the app open and run offline.
    Bump VERSION whenever you deploy a new index.html so phones refresh. */
-const VERSION = 'toontalk-v27';
+const VERSION = 'toontalk-v30';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png',
   'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png', 'vendor/mp4-muxer.js'];
