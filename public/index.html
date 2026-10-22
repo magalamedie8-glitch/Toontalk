@@ -241,7 +241,7 @@
   #toast[hidden]{display:none}
   @media (min-width:900px){
     #pgCreate.on{flex-direction:row}
-    #pgCreate .stage{width:360px;flex:0 0 360px;justify-content:flex-start}
+    #pgCreate .stage{width:470px;flex:0 0 470px;justify-content:flex-start}
     #pgCreate .stage canvas{height:min(74vh,760px)!important}
     #toolsWrap{border-left:1px solid #2a2a3a}
   }
@@ -753,10 +753,10 @@ function voiceWhy(m){ // plain-language reason for a failed voice line
   return m.slice(0,100)||'unknown reason';
 }
 async function prepareVoices(){
-  const jobs=[];let recUsed=0,recTotal=0;
+  const jobs=[];let recUsed=0,recTotal=0,recStitch=0;
   try{await lsPrepareRec();}catch(e){LS_REC=null;}
   segs.filter(s=>s.type==='line'&&!s.sing).forEach(s=>{
-    [s,...(s.co||[])].forEach(x=>{const rc=lsRecFor(x);if(cfg[x.who]&&cfg[x.who].accent)recTotal++;if(rc){recUsed++;jobs.push({s:x,rec:rc});return;}const sv=resolveSrv(cfg[x.who],chars[x.who].i);if(sv)jobs.push({s:x,sv});});
+    [s,...(s.co||[])].forEach(x=>{const rc=lsRecFor(x);if(cfg[x.who]&&cfg[x.who].accent)recTotal++;if(rc){recUsed++;jobs.push({s:x,rec:rc});return;}const stp=lsPlan(x);if(stp){recUsed++;recStitch++;jobs.push({s:x,stitch:stp});return;}const sv=resolveSrv(cfg[x.who],chars[x.who].i);if(sv)jobs.push({s:x,sv});});
   });
   if(!jobs.length)return;
   let done=0,failed=0,k=0;const why={};
@@ -765,11 +765,11 @@ async function prepareVoices(){
   await Promise.all(Array.from({length:4},async()=>{
     while(k<jobs.length){
       const j=jobs[k++];
-      try{if(j.rec)await lsRecLoad(j.s,j.rec);else await fetchLine(j.s,j.sv);}catch(e){failed++;j.s.buf=null;const w=voiceWhy(e.message);why[w]=(why[w]||0)+1;}
+      try{if(j.rec)await lsRecLoad(j.s,j.rec);else if(j.stitch)await lsStitchBuild(j.s,j.stitch);else await fetchLine(j.s,j.sv);}catch(e){failed++;j.s.buf=null;const w=voiceWhy(e.message);why[w]=(why[w]||0)+1;}
       done++;upd();
     }
   }));
-  $('status').textContent=failed?(failed+' line(s) are using the backup voice because '+Object.keys(why).join('; ')+'.'):(recTotal?('Accent profile: '+recUsed+' of '+recTotal+' line(s) are played from your recordings, the rest use the voice you chose.'):'');
+  $('status').textContent=failed?(failed+' line(s) are using the backup voice because '+Object.keys(why).join('; ')+'.'):(recTotal?('Accent profile: '+recUsed+' of '+recTotal+' line(s) are played from your recordings'+(recStitch?' ('+recStitch+' built by joining your recorded words)':'')+', the rest use the voice you chose.'):'');
 }
 
 /* ---------- parse script ---------- */
@@ -897,7 +897,7 @@ function build(){
     m=l.match(/^\[\s*([^\]]{1,20}?)\s+(?:is|as|becomes)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]{1,20}?)\s+(?:labell?ed|called|marked|saying|worth|named)\s+([^\]]{1,24}?)\s*\]$/i);
     if(m){const osp=objectFromWord(m[2]);if(osp){const ow=findChar(m[1].trim());if(ow){setObject(ow,osp);cfg[ow].olab=m[3];}return;}}
     m=l.match(/^\[\s*([^\]]{1,20}?)\s+(?:is|as|becomes|looks like)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ()]{1,24}?)\s*\]$/i);
-    if(m){const asp=animalFromWord(m[2]);if(asp){const aw=findChar(m[1].trim());if(aw)setAnimal(aw,asp);return;}const osp=objectFromWord(m[2]);if(osp){const ow=findChar(m[1].trim());if(ow)setObject(ow,osp);return;}const kk=kindFromWord(m[2]);if(kk!==undefined){const w=findChar(m[1].trim());if(w)setKind(w,kk);return;}}
+    if(m){const stk=stickFromWord(m[2]);if(stk){const sw=findChar(m[1].trim());if(sw)setStick(sw,stk);return;}const asp=animalFromWord(m[2]);if(asp){const aw=findChar(m[1].trim());if(aw)setAnimal(aw,asp);return;}const osp=objectFromWord(m[2]);if(osp){const ow=findChar(m[1].trim());if(ow)setObject(ow,osp);return;}const kk=kindFromWord(m[2]);if(kk!==undefined){const w=findChar(m[1].trim());if(w)setKind(w,kk);return;}}
     m=l.match(/^\[\s*(?:song|music|style)\s*:\s*([^\]]{1,40}?)\s*\]$/i);
     if(m){m[1].toLowerCase().split(/[\s,]+/).forEach(tk=>{if(SONG_STYLES[tk])SONG.style=tk;else if(/^\d{2,3}$/.test(tk))SONG.bpm=clamp(+tk,50,180);else if(tk==='nobeat'||tk==='nodrums')SONG.beat=false;else if(tk==='beat'||tk==='drums')SONG.beat=true;else if(tk==='off'||tk==='none')SONG={style:'pop',bpm:null,tune:null,beat:true};});return;}
     m=l.match(/^\[\s*(?:tune|melody|notes)\s*:\s*([^\]]{1,240}?)\s*\]$/i);
@@ -1057,6 +1057,7 @@ function renderCards(force){
     if((f.style||'cartoon')==='real')realCardRows(card,f,n);
     if((f.style||'cartoon')==='animal')animalCardRows(card,f,n);else if(f.style==='object')objectCardRows(card,f);
     if((f.style||'cartoon')==='art')artCardRows(card,f,n);
+    if((f.style||'cartoon')==='stick')stickCardRows(card,f,n);
     const kb=document.createElement('button');kb.textContent='🎭 '+kindLabel(kindOf(f))+' ▾';kb.onclick=()=>kindOpen(n);
     card.appendChild(row('Character',kb));
     if(!kindOf(f))card.appendChild(row('Look',mkSel(LOOKS,f.look,v=>f.look=v)));
@@ -1068,7 +1069,7 @@ function renderCards(force){
       const cats=FAVCATS.slice().sort((a,b)=>(a[0]===own?-1:b[0]===own?1:0));
       const fo=[['','— choose a favorite —']];
       cats.forEach(([k,lab])=>(favVoices[k]||[]).forEach(id=>{const v=srvVoices.find(x=>x.id===id);if(v)fo.push([k+'|'+id,lab+' · '+v.label]);}));
-            try{if(LS_PROFILES.length){const po=[['','None (use the voice above)'],...LS_PROFILES.map(p=>[p.id,p.name+' · '+lsName(p.lang)])];card.appendChild(row('🎙️ Accent profile (recorded lines)',mkSel(po,f.accent||'',val=>{f.accent=val;renderCards(true);})));}}catch(e){}
+            try{if(LS_PROFILES.length){const po=[['','None (use the voice above)'],...LS_PROFILES.map(p=>[p.id,p.name+' · '+lsName(p.lang)])];card.appendChild(row('🎙️ Accent profile (recorded lines)',mkSel(po,f.accent||'',val=>{f.accent=val;renderCards(true);})));if(f.accent){const sc=document.createElement('input');sc.type='checkbox';sc.checked=f.stitch!==false;sc.style.width='auto';sc.onchange=()=>{f.stitch=sc.checked;save();renderCards(true);};card.appendChild(row('🧩 Build new sentences from my recorded words',sc));const cv=document.createElement('div');cv.className='hint';cv.textContent='Checking your recordings…';card.appendChild(cv);lsCoverage(n,cv);}}}catch(e){}
       if(fo.length>1)card.appendChild(row('⭐ Favorite voice',mkSel(fo,'',val=>{const [k,id]=val.split('|');if(id)applyFavorite(n,k,id);renderCards(true);})));
       else if(srvVoices.length){const fb=document.createElement('button');fb.textContent='⭐ Save favorite voices';fb.onclick=()=>{vlRender();$('voiceLab').hidden=false;};card.appendChild(row('⭐ Favorites',fb));}
     }
@@ -2124,16 +2125,75 @@ function stickPose(emo,speaking,S,tt,now,c){
   }
   S.lastP=out;S.lastPT=now;return out;
 }
+/* ---------- STICK FIGURE VARIANTS: body types, clothes, extras and ready-made characters (the head still takes any cartoon Character and Look) ---------- */
+const STK_BUILD={std:{l:'Normal',leg:1,arm:1,torso:1,neck:1,head:1,th:1,hunch:0},tall:{l:'Tall and lanky',leg:1.28,arm:1.18,torso:1.1,neck:1.05,head:.95,th:.9,hunch:0},short:{l:'Short',leg:.74,arm:.82,torso:.86,neck:.9,head:1.1,th:1.05,hunch:0},kid:{l:'Child',leg:.7,arm:.72,torso:.72,neck:.8,head:1.22,th:.85,hunch:0},baby:{l:'Baby',leg:.42,arm:.5,torso:.5,neck:.55,head:1.55,th:.9,hunch:0},elder:{l:'Elder (bent, with a stick)',leg:.92,arm:.95,torso:.95,neck:.95,head:.98,th:.95,hunch:13,cane:1},strong:{l:'Strong',leg:1,arm:1.05,torso:1.05,neck:.9,head:1,th:1.6,hunch:0},chunky:{l:'Chunky',leg:.82,arm:.85,torso:.85,neck:.85,head:1.05,th:2,hunch:0},skinny:{l:'Very thin',leg:1.1,arm:1.05,torso:1.05,neck:1.05,head:.95,th:.62,hunch:0}};
+const STK_WEAR=[['none','No clothes'],['tee','T-shirt'],['dress','Dress'],['trousers','Shirt and trousers'],['suit','Suit and tie'],['robe','Long robe / kanzu / coat'],['hoodie','Hoodie'],['uniform','School uniform'],['cape','Hero cape'],['gomesi','Gomesi'],['apron','Apron']];
+const STK_ACC=[['','No extras'],['shoes','Shoes'],['scarf','Scarf'],['backpack','School bag'],['belt','Belt'],['bowtie','Bow tie']];
+const STK_CLC={tee:'#e8590c',dress:'#e64980',trousers:'#2f6fba',suit:'#2b2d42',robe:'#f1f3f5',hoodie:'#7950f2',uniform:'#ffffff',cape:'#e03131',gomesi:'#d6336c',apron:'#f8f9fa'};
+const STK_TYPES={
+  man:{l:'Man',build:'std',wear:'tee',acc:'shoes',look:'tuft'},woman:{l:'Woman',build:'std',wear:'dress',acc:'shoes',look:'ponytail'},
+  boy:{l:'School boy',build:'kid',wear:'uniform',acc:'backpack',look:'school'},girl:{l:'Girl',build:'kid',wear:'dress',acc:'',look:'ponytail'},
+  baby:{l:'Baby',build:'baby',wear:'none',acc:'',look:'tuft'},granny:{l:'Granny (jajja)',build:'elder',wear:'gomesi',acc:'',look:'gomesi'},
+  grandpa:{l:'Grandpa (mzee)',build:'elder',wear:'robe',acc:'',look:'kofia'},hero:{l:'Superhero',build:'strong',wear:'cape',acc:'belt',look:'tuft'},
+  teacher:{l:'Teacher',build:'std',wear:'suit',acc:'',look:'glasses'},doctor:{l:'Doctor',build:'std',wear:'robe',acc:'',look:'glasses'},
+  farmer:{l:'Farmer',build:'std',wear:'trousers',acc:'shoes',look:'cap'},rider:{l:'Boda rider',build:'std',wear:'hoodie',acc:'',look:'helmet'},
+  boss:{l:'Boss',build:'tall',wear:'suit',acc:'',look:'glasses'},strongman:{l:'Strong man',build:'strong',wear:'tee',acc:'belt',look:'tuft'},chubby:{l:'Chubby friend',build:'chunky',wear:'tee',acc:'shoes',look:'cap'}
+};
+const STK_WORD={'stick man':'man','stickman':'man','stick woman':'woman','stick lady':'woman','stick boy':'boy','stick student':'boy','stick pupil':'boy','stick girl':'girl','stick baby':'baby','stick granny':'granny','stick grandma':'granny','stick jajja':'granny','stick grandpa':'grandpa','stick mzee':'grandpa','stick old man':'grandpa','stick hero':'hero','stick superhero':'hero','stick teacher':'teacher','stick doctor':'doctor','stick farmer':'farmer','stick boda rider':'rider','stick rider':'rider','stick boss':'boss','stick businessman':'boss','stick strongman':'strongman','stick strong man':'strongman','stick chubby':'chubby','stick fat man':'chubby'};
+function stickFromWord(w){w=String(w).toLowerCase().replace(/\s*\(.*\)\s*/g,' ').replace(/^(?:a\s+|an\s+|the\s+)/,'').trim();return STK_WORD[w]||null;}
+function setStick(name,key){const f=cfg[name],T=STK_TYPES[key];if(!f||!T)return;f.style='stick';f.kind='';f.build=T.build;f.wear=T.wear;f.acc2=T.acc;f.look=T.look;f.clc=null;}
+function stickClc(f){return /^#[0-9a-f]{6}$/i.test(f.clc||'')?f.clc:(STK_CLC[f.wear]||'#e8590c');}
+function stickCardRows(card,f,n){
+  card.appendChild(row('Stick type',mkSel([['','— pick a ready-made type —'],...Object.keys(STK_TYPES).map(k=>[k,STK_TYPES[k].l])],'',v=>{if(v){setStick(n,v);renderCards(true);}})));
+  card.appendChild(row('Body',mkSel(Object.keys(STK_BUILD).map(k=>[k,STK_BUILD[k].l]),f.build||'std',v=>f.build=v)));
+  card.appendChild(row('Clothes',mkSel(STK_WEAR,f.wear||'none',v=>{f.wear=v;f.clc=null;renderCards(true);}),mkIn('color',stickClc(f),v=>f.clc=v)));
+  card.appendChild(row('Extras',mkSel(STK_ACC,f.acc2||'',v=>f.acc2=v)));
+}
+function stickWear(f,g,ph){
+  const W=f.wear||'none',A=f.acc2||'',cl=stickClc(f),th=g.th,hip=g.hip,sh=g.sh,fc=g.fc;
+  const dx=sh[0]-hip[0],dy=sh[1]-hip[1],ln=Math.hypot(dx,dy)||1,ux=dx/ln,uy=dy/ln,nx=-uy,ny=ux;
+  const wS=th*1.1+7,wH=th*0.9+5,feetY=Math.max(hip[1]+g.LL[1][1],hip[1]+g.RL[1][1]);
+  const P=(b,s,t)=>[b[0]+nx*s+ux*t,b[1]+ny*s+uy*t];
+  const poly=(pts,fill,stroke)=>{ctx.beginPath();pts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=3;ctx.stroke();}};
+  const dark=_mix(cl,'#000000',0.25);
+  const thick=(LL,w,col,upto)=>{ctx.strokeStyle=col;ctx.lineWidth=w;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(hip[0],hip[1]);ctx.lineTo(hip[0]+LL[0][0],hip[1]+LL[0][1]);if(upto!==0.5)ctx.lineTo(hip[0]+LL[1][0],hip[1]+LL[1][1]);ctx.stroke();};
+  if(ph==='back'){
+    if(W==='cape'){const dir=-fc,fl=g.mv?Math.sin(g.tt*14)*14+30:8;ctx.fillStyle=cl;ctx.beginPath();ctx.moveTo(sh[0]+nx*wS,sh[1]+ny*wS);ctx.quadraticCurveTo(sh[0]+dir*(40+fl),(sh[1]+hip[1])/2,hip[0]+dir*(30+fl),feetY-g.LG*0.35);ctx.lineTo(hip[0]+dir*2,hip[1]+g.LG*0.25);ctx.lineTo(sh[0]-nx*wS,sh[1]-ny*wS);ctx.closePath();ctx.fill();}
+    if(A==='backpack'){const dir=-fc,c=[(sh[0]+hip[0])/2+dir*(th*0.9+10),(sh[1]+hip[1])/2];ctx.fillStyle='#f59f00';ctx.beginPath();ctx.roundRect(c[0]-15,c[1]-24,30,48,9);ctx.fill();ctx.fillStyle='#e67700';ctx.fillRect(c[0]-12,c[1]-4,24,5);}
+    return;
+  }
+  // body clothes
+  if(W==='tee'||W==='trousers'||W==='hoodie'||W==='uniform'||W==='suit'||W==='cape'||W==='apron'){
+    const shirt=W==='trousers'?'#e8590c':W==='uniform'?'#ffffff':W==='cape'?'#1c7ed6':W==='apron'?'#74c0fc':cl;
+    if(W==='trousers'||W==='suit'||W==='uniform'){const pc=W==='trousers'?'#37474f':W==='suit'?cl:'#364fc7';thick(g.LL,th*1.7,pc,W==='uniform'?0.5:1);thick(g.RL,th*1.7,pc,W==='uniform'?0.5:1);}
+    poly([P(sh,wS,5),P(sh,-wS,5),P(hip,-wH,0),P(hip,wH,0)],shirt,'rgba(0,0,0,.25)');
+    if(W==='suit'){poly([P(sh,0,5),P(sh,wS*0.55,-18),P(sh,-wS*0.55,-18)],'#f8f9fa');poly([P(sh,0,-6),P(sh,5,-20),P(sh,0,-44),P(sh,-5,-20)],'#e03131');}
+    if(W==='uniform'){ctx.strokeStyle='#364fc7';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(...P(sh,-wS*0.6,3));ctx.lineTo(...P(sh,0,-14));ctx.lineTo(...P(sh,wS*0.6,3));ctx.stroke();}
+    if(W==='apron'){poly([P(sh,wS*0.7,-2),P(sh,-wS*0.7,-2),P(hip,-wH*1.1,-26),P(hip,wH*1.1,-26)],'#f8f9fa','rgba(0,0,0,.2)');}
+    if(W==='hoodie'){ctx.fillStyle=_mix(cl,'#000000',0.18);ctx.beginPath();ctx.arc(g.hd[0],g.hd[1]+4,g.HR*1.12,0,7);ctx.fill();ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(...P(hip,-wH*0.6,14));ctx.lineTo(...P(hip,wH*0.6,14));ctx.stroke();}
+  }
+  if(W==='dress'||W==='gomesi'){
+    const hy=W==='gomesi'?feetY-6:hip[1]+g.LG*0.95,w2=th*2.4+(W==='gomesi'?30:24);
+    ctx.fillStyle=cl;ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(...P(sh,wS,5));ctx.lineTo(...P(sh,-wS,5));ctx.lineTo(hip[0]-wH,hip[1]);ctx.quadraticCurveTo(hip[0]-w2*1.05,hy-14,hip[0]-w2,hy);ctx.quadraticCurveTo(hip[0],hy+9,hip[0]+w2,hy);ctx.quadraticCurveTo(hip[0]+w2*1.05,hy-14,hip[0]+wH,hip[1]);ctx.closePath();ctx.fill();ctx.stroke();
+    if(W==='gomesi'){ctx.fillStyle=cl;for(const s of[-1,1]){const p=P(sh,s*(wS+4),-2);ctx.beginPath();ctx.arc(p[0],p[1],th*0.8+7,0,7);ctx.fill();}ctx.strokeStyle='#fff';ctx.lineWidth=8;ctx.beginPath();ctx.moveTo(...P(hip,-wH*1.2,6));ctx.lineTo(...P(hip,wH*1.2,6));ctx.stroke();}
+  }
+  if(W==='robe'){const w2=th*1.9+26,hy=feetY-4;ctx.fillStyle=cl;ctx.strokeStyle='rgba(0,0,0,.28)';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(...P(sh,wS+2,5));ctx.lineTo(...P(sh,-wS-2,5));ctx.lineTo(hip[0]-wH-6,hip[1]);ctx.lineTo(hip[0]-w2,hy);ctx.quadraticCurveTo(hip[0],hy+8,hip[0]+w2,hy);ctx.lineTo(hip[0]+wH+6,hip[1]);ctx.closePath();ctx.fill();ctx.stroke();ctx.strokeStyle='rgba(0,0,0,.2)';ctx.beginPath();ctx.moveTo(...P(sh,0,0));ctx.lineTo(hip[0],hy);ctx.stroke();}
+  // extras
+  if(A==='shoes'){ctx.fillStyle='#222';for(const L of[g.LL,g.RL]){ctx.beginPath();ctx.ellipse(hip[0]+L[1][0]+fc*8,hip[1]+L[1][1]+3,th*0.9+8,th*0.5+3,0,0,7);ctx.fill();}}
+  if(A==='scarf'){const c=P(sh,0,th*0.9);ctx.fillStyle='#e03131';ctx.beginPath();ctx.ellipse(c[0],c[1],th*1.05+9,th*0.55+4,Math.atan2(ny,nx),0,7);ctx.fill();ctx.fillRect(c[0]-fc*(th*0.9)-5,c[1],10,th*2+16);}
+  if(A==='belt'){ctx.strokeStyle='#3b2a1a';ctx.lineWidth=8;ctx.beginPath();ctx.moveTo(...P(hip,-wH-2,10));ctx.lineTo(...P(hip,wH+2,10));ctx.stroke();const b=P(hip,0,10);ctx.fillStyle='#ffd43b';ctx.fillRect(b[0]-6,b[1]-6,12,12);}
+  if(A==='bowtie'){const c=P(sh,0,th*0.8);ctx.fillStyle='#e03131';ctx.beginPath();ctx.moveTo(c[0],c[1]);ctx.lineTo(c[0]-20,c[1]-11);ctx.lineTo(c[0]-20,c[1]+11);ctx.closePath();ctx.moveTo(c[0],c[1]);ctx.lineTo(c[0]+20,c[1]-11);ctx.lineTo(c[0]+20,c[1]+11);ctx.closePath();ctx.fill();}
+}
 function drawStick(c,x,sc,speaking,emo,isSp,tt,now,S){
-  const f=cfg[c.name],col=f.outfit,out=col,look=kindOf(f)?'none':f.look,skin=f.skin,th=+f.thick||10;
+  const f=cfg[c.name],col=f.outfit,out=col,look=kindOf(f)?'none':f.look,skin=f.skin,B=STK_BUILD[f.build]||STK_BUILD.std,th=(+f.thick||10)*B.th,LG=64*B.leg,AML=52*B.arm,TO=78*B.torso,NK=50*B.neck,HR=40*B.head;
   const P=S.fixedPose||stickPose(emo,speaking,S,tt,now,c);
-  const leg=a=>{const k=seg2(0,0,a[0],64);return [k,seg2(k[0],k[1],a[1],64)];};
+  const leg=a=>{const k=seg2(0,0,a[0],LG);return [k,seg2(k[0],k[1],a[1],LG)];};
   const LL=leg(P.ll),RL=leg(P.rl);
   const hipY=(204-th/2)-Math.max(LL[1][1],RL[1][1]);
   const hip=[0,hipY+P.dy];
-  const sh=[hip[0]+Math.sin(P.lean*R)*78,hip[1]-Math.cos(P.lean*R)*78];
-  const tl=P.lean+P.tilt;
-  const hd=[sh[0]+Math.sin(tl*R)*50,sh[1]-Math.cos(tl*R)*50];
+  const ln0=P.lean+B.hunch,sh=[hip[0]+Math.sin(ln0*R)*TO,hip[1]-Math.cos(ln0*R)*TO];
+  const tl=ln0+P.tilt;
+  const hd=[sh[0]+Math.sin(tl*R)*NK,sh[1]-Math.cos(tl*R)*NK];const G={hip,sh,hd,LL,RL,th,LG,HR,fc:S.face||1,tt,mv:!!S.moving};
   ctx.save();ctx.translate(x+P.dx,BASE_Y);ctx.scale(sc,sc);
   const air=clamp(-P.dy/60,0,1);
   ctx.fillStyle='#0003';E(0,206,80*(1-air*.35),16*(1-air*.35));
@@ -2146,17 +2206,21 @@ function drawStick(c,x,sc,speaking,emo,isSp,tt,now,S){
   if(P.sx!==1)ctx.scale(P.sx,1);
   ctx.strokeStyle=col;ctx.lineWidth=th;ctx.lineCap='round';ctx.lineJoin='round';
   const limb=(o,pts)=>{ctx.beginPath();pts.forEach((p,k)=>k?ctx.lineTo(o[0]+p[0],o[1]+p[1]):ctx.moveTo(o[0]+p[0],o[1]+p[1]));ctx.stroke();};
+  stickWear(f,G,'back');
   limb(hip,[[0,0],LL[0],LL[1]]);limb(hip,[[0,0],RL[0],RL[1]]);
   ctx.beginPath();ctx.moveTo(hip[0],hip[1]);ctx.lineTo(sh[0],sh[1]);ctx.lineTo(hd[0],hd[1]);ctx.stroke();
-  const arm=(a,sg)=>{const e=seg2(sh[0],sh[1],sg*a[0],52),h=seg2(e[0],e[1],sg*a[1],52);ctx.beginPath();ctx.moveTo(sh[0],sh[1]);ctx.lineTo(e[0],e[1]);ctx.lineTo(h[0],h[1]);ctx.stroke();return h;};
+  ctx.save();stickWear(f,G,'body');ctx.restore();ctx.strokeStyle=col;ctx.lineWidth=th;ctx.lineCap='round';ctx.lineJoin='round';
+  const arm=(a,sg)=>{const e=seg2(sh[0],sh[1],sg*a[0],AML),h=seg2(e[0],e[1],sg*a[1],AML);ctx.beginPath();ctx.moveTo(sh[0],sh[1]);ctx.lineTo(e[0],e[1]);ctx.lineTo(h[0],h[1]);ctx.stroke();return h;};
   const hL=arm(P.la,-1),hR=arm(P.ra,1);
+  if(f.build&&f.build!=='std')HEADY[c.name]=BASE_Y+(hd[1]-HR*1.75)*sc;
+  if(B.cane&&!S.fixedPose){const hh=S.face>=0?hR:hL;ctx.save();ctx.strokeStyle='#7a4a21';ctx.lineWidth=7;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(hh[0],hh[1]-6);ctx.lineTo(hh[0]+S.face*6,206);ctx.stroke();ctx.restore();}
   if(!S.fixedPose){for(const p of PR){if(p.held!==c.name)continue;const d=PROPS[p.name];if(!d)continue;const h=S.face>=0?hR:hL;ctx.save();ctx.translate(h[0],h[1]);d.draw();ctx.restore();}}
   // head, hat and face (drawn at the cartoon head's scale so the same details fit)
   ctx.save();ctx.translate(hd[0],hd[1]);ctx.rotate(tl*R);
-  if(f.kind&&KINDS[f.kind]){ctx.save();ctx.scale(40/86,40/86);kindDraw(f,'back',0,true,tt,emo);ctx.restore();}
-  ctx.fillStyle=skin;ctx.beginPath();ctx.arc(0,0,40,0,7);ctx.fill();
+  if(f.kind&&KINDS[f.kind]){ctx.save();ctx.scale(HR/86,HR/86);kindDraw(f,'back',0,true,tt,emo);ctx.restore();}
+  ctx.fillStyle=skin;ctx.beginPath();ctx.arc(0,0,HR,0,7);ctx.fill();
   ctx.strokeStyle=col;ctx.lineWidth=th*0.8;ctx.stroke();
-  const K=40/86;ctx.scale(K,K);
+  const K=HR/86;ctx.scale(K,K);
   const cy=0;
   if(emo==='angry'){ctx.fillStyle='rgba(255,0,0,.2)';ctx.beginPath();ctx.arc(0,cy,86,0,7);ctx.fill();}
   const hair='#1a1a1a';
@@ -4880,6 +4944,46 @@ async function lsPrepareRec(){
   try{await lsLoadProfiles();const map={};(await lsAll()).forEach(c=>{if(c.blob&&c.verdict==='ok'&&used.has(c.profile)){(map[c.profile]=map[c.profile]||{})[lsKey(c.text)]=c;}});LS_REC=map;}catch(e){LS_REC=null;}
 }
 function lsRecFor(x){const f=cfg[x.who],m=f&&f.accent&&LS_REC&&LS_REC[f.accent];return m?m[lsKey(x.text)]||null:null;}
+/* ---- level 2: build new sentences from the speaker's recorded words and phrases (no new voice, the real recordings joined together) ---- */
+function lsPlanText(map,text){
+  const tk=lsNorm(text);if(!map||!tk.length)return null;
+  const n=tk.length,best=new Array(n+1).fill(null),cov=new Array(n).fill(false);best[0]={c:0,prev:-1,key:null};
+  for(let i=0;i<n;i++){
+    for(let j=Math.min(n,i+8);j>i;j--){const k=tk.slice(i,j).join(' ');if(map[k]){for(let q=i;q<j;q++)cov[q]=true;if(best[i]){const c=best[i].c+1;if(!best[j]||c<best[j].c)best[j]={c,prev:i,key:k};}}}
+  }
+  const missing=tk.filter((w,i)=>!cov[i]);
+  if(!best[n])return {full:false,exact:false,parts:[],missing};
+  const parts=[];for(let j=n;j>0;j=best[j].prev)parts.unshift({key:best[j].key,clip:map[best[j].key]});
+  return {full:true,exact:parts.length===1&&parts[0].key===tk.join(' '),parts,missing:[]};
+}
+function lsStitchOn(f){return !!(f&&f.accent&&f.stitch!==false);}
+function lsPlan(x){const f=cfg[x.who];if(!lsStitchOn(f))return null;const m=LS_REC&&LS_REC[f.accent];const p=m?lsPlanText(m,x.text):null;return p&&p.full&&!p.exact?p:null;}
+async function lsStitchBuild(s,plan){
+  ensureAudio();const sr=actx.sampleRate,pieces=[];
+  for(const p of plan.parts){
+    const b=await lsDecode(p.clip.blob),d=b.getChannelData(0);let pk=0;for(let i=0;i<d.length;i++){const a=Math.abs(d[i]);if(a>pk)pk=a;}
+    if(!pk)continue;const th=pk*0.03,pad=Math.round(sr*0.015);let a0=0,a1=d.length-1;while(a0<a1&&Math.abs(d[a0])<th)a0++;while(a1>a0&&Math.abs(d[a1])<th)a1--;
+    a0=Math.max(0,a0-pad);a1=Math.min(d.length-1,a1+pad);const seg=d.slice(a0,a1+1);
+    let e=0;for(let i=0;i<seg.length;i++)e+=seg[i]*seg[i];const rms=Math.sqrt(e/seg.length)||0.05;let g=clamp(0.1/rms,0.3,3);let mx=0;for(let i=0;i<seg.length;i++)mx=Math.max(mx,Math.abs(seg[i]*g));if(mx>0.95)g*=0.95/mx;
+    const fd=Math.round(sr*0.008);for(let i=0;i<seg.length;i++){let v=seg[i]*g;if(i<fd)v*=i/fd;else if(seg.length-i<fd)v*=(seg.length-i)/fd;seg[i]=v;}
+    pieces.push(seg);
+  }
+  if(!pieces.length)throw new Error('no audio in the recorded clips');
+  const gap=Math.round(sr*0.09),len=pieces.reduce((a,p)=>a+p.length,0)+gap*(pieces.length-1),out=new Float32Array(len);let o=0;
+  pieces.forEach((p,i)=>{out.set(p,o);o+=p.length+(i<pieces.length-1?gap:0);});
+  const buf=actx.createBuffer(1,len,sr);buf.copyToChannel(out,0);
+  let vis=null;try{vis=analyzeVisemes(buf);}catch(e){}
+  s.buf=buf;s.vis=vis;
+}
+async function lsMapFor(pid){const m={};(await lsAll()).forEach(c=>{if(c.blob&&c.verdict==='ok'&&c.profile===pid)m[lsKey(c.text)]=c;});return m;}
+async function lsCoverage(name,el){
+  try{
+    const f=cfg[name];if(!f||!f.accent){el.textContent='';return;}
+    const m=await lsMapFor(f.accent),ls=[];segs.filter(s=>s.type==='line'&&!s.sing).forEach(s=>[s,...(s.co||[])].forEach(x=>{if(x.who===name)ls.push(x);}));
+    let ex=0,st=0,no=0;const miss=new Set();ls.forEach(x=>{const p=lsPlanText(m,x.text);if(!p||!p.full){no++;(p?p.missing:[]).forEach(w=>miss.add(w));}else if(p.exact)ex++;else if(f.stitch!==false)st++;else no++;});
+    el.textContent=ls.length?('🎙 '+ls.length+' line'+(ls.length===1?'':'s')+': '+ex+' played from recordings, '+st+' built from your recorded words, '+no+' use the normal voice'+(miss.size?'. Words to record: '+[...miss].slice(0,12).join(', ')+(miss.size>12?'…':''):'')+'.'):'No lines for this character yet.';
+  }catch(e){el.textContent='';}
+}
 async function lsRecLoad(s,clip){
   const buf=await lsDecode(clip.blob);let vis=null;try{vis=analyzeVisemes(buf);}catch(e){}
   s.buf=buf;s.vis=vis;
@@ -4929,7 +5033,7 @@ async function lsRender(keep){
   if(lsActiveProf&&!lsProf(lsActiveProf))lsActiveProf='';
   box.innerHTML='';
   box.appendChild(lsEl('div',{style:'display:flex;gap:8px;align-items:center'},[lsEl('b',{style:'font-size:18px;flex:1',textContent:'🎙️ Language Studio'}),lsEl('button',{id:'lsClose',textContent:'✕ Close',style:'flex:0 0 auto;background:#adb5bd'})]));
-  box.appendChild(lsEl('div',{className:'hint',textContent:'1) Make an accent profile for each speaker. 2) Record the lines in it and mark each Correct or Needs correction. 3) On a character card, choose that profile: lines you recorded and marked Correct are played in that real accent. Everything stays on this device. Always ask the speaker first.'}));
+  box.appendChild(lsEl('div',{className:'hint',textContent:'1) Make an accent profile for each speaker. 2) Record the lines in it and mark each Correct or Needs correction. 3) Press “Use for a character” on a profile (or choose it on the character card): lines you recorded are played from the recording, and new lines are built by joining your recorded words and phrases (🧩) when every word is recorded. Everything stays on this device. Always ask the speaker first.'}));
   // --- accent profiles
   box.appendChild(lsEl('div',{className:'vl-h',textContent:'Accent profiles ('+LS_PROFILES.length+')'}));
   const bNew=lsEl('button',{id:'lsNewProf',textContent:'＋ New accent profile',style:'background:#ffd43b'});
@@ -4952,7 +5056,11 @@ async function lsRender(keep){
     const bX=lsEl('button',{textContent:'⬇ Export',style:'background:#b197fc'});bX.onclick=async()=>{lsMsg('Preparing the file…');try{const n=await lsExport(true,p.id);lsMsg('Exported '+n+' Correct clip(s) ✓');}catch(e){lsMsg(String(e.message||e),true);}};
     const bE=lsEl('button',{textContent:'✎ Edit',style:'background:#a5d8ff'});bE.onclick=async()=>{const q=lsProfForm(p);if(!q)return;await lsProfPut(q);lsRender(true);};
     const bD=lsEl('button',{textContent:'🗑',title:'Delete the profile (clips are kept)',style:'background:#868e96'});bD.onclick=async()=>{if(!confirm('Delete the profile “'+p.name+'”? Its clips are kept but lose the profile.'))return;for(const k of lsCache.filter(k=>k.profile===p.id)){k.profile='';await lsPut(k);}await lsProfDel(p.id);if(lsActiveProf===p.id)lsActiveProf='';lsRender(true);};
-    bar.append(bU,bX,bE,bD);c.appendChild(bar);box.appendChild(c);
+    const usedBy=order.filter(nm=>cfg[nm]&&cfg[nm].accent===p.id);
+    c.appendChild(lsEl('div',{className:'hint',textContent:usedBy.length?'🎭 Used by: '+usedBy.join(', '):'🎭 Not used by any character yet.'}));
+    const bC=lsEl('button',{textContent:'🎭 Use for a character',style:'background:#ffa8a8'});
+    bC.onclick=async()=>{if(!order.length){lsMsg('Write a script with characters first.',true);return;}const pick=await ask('Use “'+p.name+'”','Which character should speak in this accent? Lines you recorded are played from the recording, and new lines are built from your recorded words.',[...order.slice(0,6).map(nm=>[nm,nm,'#69db7c']),['Cancel','no','#adb5bd']]);if(!pick||pick==='no')return;cfg[pick].accent=p.id;save();renderCards(true);lsRender(true);lsMsg('“'+pick+'” now uses '+p.name+' ✓');};
+    bar.append(bU,bC,bX,bE,bD);c.appendChild(bar);box.appendChild(c);
   });
   // --- new clip card
   box.appendChild(lsEl('div',{className:'vl-h',textContent:'Record a line'}));
@@ -4971,10 +5079,13 @@ async function lsRender(keep){
   const eps=(typeof segs!=='undefined'?segs:[]).filter(s=>s.type==='line'&&!s.sing&&s.text);
   if(eps.length){
     const seen=new Set(),have=new Set(lsCache.filter(c=>c.verdict==='ok'&&(!lsActiveProf||c.profile===lsActiveProf)).map(c=>lsKey(c.text)));
+    const stMap={};lsCache.forEach(c=>{if(c.blob&&c.verdict==='ok'&&(!lsActiveProf||c.profile===lsActiveProf))stMap[lsKey(c.text)]=c;});
+    const needW=new Set();eps.forEach(s=>{const pl=lsPlanText(stMap,s.text);if(pl&&!pl.full)pl.missing.forEach(w=>needW.add(w));else if(!pl)lsNorm(s.text).forEach(w=>needW.add(w));});
     const det=lsEl('details',{className:'ls-eps'},[lsEl('summary',{textContent:'📜 Lines from my current episode (tap one to record it)'})]);
     eps.forEach(s=>{const k=lsKey(s.text);if(seen.has(k)||seen.size>=40)return;seen.add(k);
-      const b=lsEl('button',{className:'ls-ep',textContent:(have.has(k)?'✓ ':'')+s.who+': '+s.text});b.onclick=()=>{$('lsText').value=s.text;lsMsg('Now record this line.');$('lsText').scrollIntoView({block:'center'});};det.appendChild(b);});
+      const pl=lsPlanText(stMap,s.text),mark=have.has(k)?'✓ ':(pl&&pl.full?'🧩 ':'');const b=lsEl('button',{className:'ls-ep',textContent:mark+s.who+': '+s.text});b.onclick=()=>{$('lsText').value=s.text;lsMsg('Now record this line.');$('lsText').scrollIntoView({block:'center'});};det.appendChild(b);});
     card.appendChild(det);
+    if(needW.size){const dw=lsEl('details',{className:'ls-eps'},[lsEl('summary',{textContent:'🔤 Words still to record for this episode ('+needW.size+') — tap one'})]);[...needW].slice(0,60).forEach(w=>{const b=lsEl('button',{className:'ls-ep',textContent:w});b.onclick=()=>{$('lsText').value=w;lsMsg('Now record this word.');$('lsText').scrollIntoView({block:'center'});};dw.appendChild(b);});card.appendChild(dw);}
   }
   const meter=lsEl('div',{className:'ls-meter'},[lsEl('i',{id:'lsLvl'})]);
   const wave=lsEl('canvas',{id:'lsWave',width:600,height:80,style:'width:100%;height:80px;border-radius:8px'});
